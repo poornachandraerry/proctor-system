@@ -58,6 +58,13 @@ if (process.env.NODE_ENV !== 'test') {
 }
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+app.get('/', (req, res) => {
+  res.send('ROOT ROUTE WORKING');
+});
+
+app.get('/test123', (req, res) => {
+  res.send('TEST123 WORKING');
+});
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' }));
 
 // Auth rate limiter
