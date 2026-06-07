@@ -1,0 +1,12 @@
+const router = require('express').Router();
+const { getExams, getExam, createExam, updateExam, deleteExam, publishExam, getExamStats } = require('../controllers/examController');
+const { authenticate, authorize } = require('../middleware/auth');
+router.use(authenticate);
+router.get('/', getExams);
+router.get('/:id', getExam);
+router.get('/:id/stats', authorize('admin','examiner'), getExamStats);
+router.post('/', authorize('admin','examiner'), createExam);
+router.put('/:id', authorize('admin','examiner'), updateExam);
+router.patch('/:id/publish', authorize('admin','examiner'), publishExam);
+router.delete('/:id', authorize('admin'), deleteExam);
+module.exports = router;

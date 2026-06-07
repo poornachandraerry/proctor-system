@@ -1,0 +1,11 @@
+const router = require('express').Router();
+const { startSession, getSession, updateSessionEvent, submitSession, getActiveSessions, terminateSession } = require('../controllers/sessionController');
+const { authenticate, authorize } = require('../middleware/auth');
+router.use(authenticate);
+router.post('/start', startSession);
+router.get('/active', authorize('admin','examiner'), getActiveSessions);
+router.get('/:id', getSession);
+router.post('/:id/events', updateSessionEvent);
+router.post('/:id/submit', submitSession);
+router.post('/:id/terminate', authorize('admin','examiner'), terminateSession);
+module.exports = router;
