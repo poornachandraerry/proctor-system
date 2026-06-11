@@ -1,30 +1,8 @@
-# Dependencies
 node_modules/
-.pnp/
-
-# Environment files - NEVER commit these
 .env
 .env.local
-.env.production
-
-# Build outputs
 dist/
 build/
-
-# Logs
+coverage/
 logs/
 *.log
-
-# Uploads (user data)
-backend/uploads/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/settings.json
-.idea/
-
-# Test coverage
-coverage/
