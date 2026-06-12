@@ -368,13 +368,46 @@ async function createInvoice(req, res) {
     const total   = base + cgst + sgst + igst;
     const r = await query(`
       INSERT INTO gst_invoices (
-        org_id, invoice_number, plan_name, base_amount,
-        cgst_rate, sgst_rate, igst_rate, cgst_amount, sgst_amount, igst_amount,
-        total_amount, billing_period_start, billing_period_end, due_date, notes
-      ) VALUES ($1,$2,$3,$4,
-        ${isIgst?'0,0,18':'9,9,0'},$5,$6,$7,$8,$9,$10,$11
-      ) RETURNING *
-    `, [orgId, invNum, planName, base, cgst, sgst, igst, total, billingStart, billingEnd, dueDate, notes]);
+        org_id,
+        invoice_number,
+        plan_name,
+        base_amount,
+        cgst_rate,
+        sgst_rate,
+        igst_rate,
+        cgst_amount,
+        sgst_amount,
+        igst_amount,
+        total_amount,
+        billing_period_start,
+        billing_period_end,
+        due_date,
+        notes
+      )
+      VALUES (
+        $1,$2,$3,$4,
+        $5,$6,$7,
+        $8,$9,$10,
+        $11,$12,$13,$14,$15
+      )
+      RETURNING *
+    `, [
+      orgId,
+      invNum,
+      planName,
+      base,
+      isIgst ? 0 : 9,
+      isIgst ? 0 : 9,
+      isIgst ? 18 : 0,
+      cgst,
+      sgst,
+      igst,
+      total,
+      billingStart,
+      billingEnd,
+      dueDate,
+      notes
+    ]);
     res.status(201).json(r.rows[0]);
   } catch (err) {
     logger.error('createInvoice:', err.message);
