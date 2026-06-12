@@ -5,13 +5,19 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "db:migrate":    "node src/config/migrate.js",
-    "db:seed":       "node src/config/seed.js",
+
+    "db:migrate": "node src/config/migrate.js",
+    "db:seed": "node src/config/seed.js",
+
+    "db:migrate:licensing": "node src/config/migrate_licensing_base.js",
+
     "db:migrate:v2": "node src/config/migrate_licensing_v2.js",
-    "db:seed:v2":    "node src/config/seed_licensing_v2.js",
+    "db:seed:v2": "node src/config/seed_licensing_v2.js",
+
     "db:migrate:v3": "node src/config/migrate_v3.js",
     "db:migrate:v4": "node src/config/migrate_v4.js",
-    "db:setup:full": "npm run db:migrate && npm run db:seed && npm run db:migrate:v2 && npm run db:seed:v2 && npm run db:migrate:v3 && npm run db:migrate:v4"
+
+    "db:setup:full": "npm run db:migrate && npm run db:seed && npm run db:migrate:licensing && npm run db:migrate:v2 && npm run db:seed:v2 && npm run db:migrate:v3 && npm run db:migrate:v4"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
@@ -36,5 +42,7 @@
     "winston": "^3.13.0",
     "xlsx": "^0.18.5"
   },
-  "devDependencies": { "nodemon": "^3.1.4" }
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
 }
