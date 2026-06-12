@@ -15,6 +15,7 @@
     "db:seed:v2": "node src/config/seed_licensing_v2.js",
 
     "db:migrate:licensingfix": "node src/config/migrate_licensing_fix.js",
+    "db:migrate:licensingupgrade": "node src/config/migrate_licensing_schema_upgrade.js",
 
     "db:migrate:v3": "node src/config/migrate_v3.js",
     "db:migrate:v4": "node src/config/migrate_v4.js",
