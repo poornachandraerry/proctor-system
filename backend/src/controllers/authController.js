@@ -7,11 +7,16 @@ async function login(req, res) {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const result = await query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+    const result = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.toLowerCase()]);
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (!user.is_active) return res.status(403).json({ error: 'Account is disabled' });
     const valid = await bcrypt.compare(password, user.password_hash);
+
+    console.log('LOGIN DEBUG');
+    console.log('Email entered:', email);
+    console.log('User found:', !!user);
+    console.log('Password match:', valid);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
     await query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
