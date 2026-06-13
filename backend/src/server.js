@@ -95,14 +95,42 @@ app.use('/api/licensing', require('./routes/licensing'));
 
 const { query } = require('./config/database');
 
-app.get('/debug-users', async (req, res) => {
+app.get('/debug-admin', async (req, res) => {
   try {
-    const result = await query(
-      'SELECT id, email, role, is_active FROM users WHERE LOWER(email)=LOWER($1)',
-      ['admin@proctorai.co.in']
-    );
+    const result = await query(`
+      SELECT
+        id,
+        email,
+        role,
+        is_active,
+        password_hash
+      FROM users
+      WHERE LOWER(email)=LOWER($1)
+    `, ['admin@proctorai.co.in']);
 
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message
+    });
+  }
+});
+
+const bcrypt = require('bcryptjs');
+
+app.get('/force-reset-admin', async (req, res) => {
+  try {
+    const hash = await bcrypt.hash('Rittan@123n', 12);
+
+    await query(
+      'UPDATE users SET password_hash=$1 WHERE LOWER(email)=LOWER($2)',
+      [hash, 'admin@proctorai.co.in']
+    );
+
+    res.json({
+      success: true,
+      hash
+    });
   } catch (err) {
     res.status(500).json({
       error: err.message
