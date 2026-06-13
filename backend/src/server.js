@@ -120,7 +120,7 @@ const bcrypt = require('bcryptjs');
 
 app.get('/force-reset-admin', async (req, res) => {
   try {
-    const hash = await bcrypt.hash('Rittan@123n', 12);
+    const hash = await bcrypt.hash('Rittan@123', 12);
 
     await query(
       'UPDATE users SET password_hash=$1 WHERE LOWER(email)=LOWER($2)',
