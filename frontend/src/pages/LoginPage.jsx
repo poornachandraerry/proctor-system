@@ -6,9 +6,9 @@ import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 
 const DEMO_ACCOUNTS = [
-  { role: 'Admin',    email: 'admin@proctorAI.com',    password: 'Admin@123',    color: 'text-purple-400 border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20' },
-  { role: 'Examiner', email: 'examiner@proctorAI.com', password: 'Exam@123',     color: 'text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20' },
-  { role: 'Student',  email: 'student@proctorAI.com',  password: 'Student@123',  color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20' },
+  { role: 'Admin',    email: 'admin@proctorAI.co.in',    password: 'Rittan@123',    color: 'text-purple-400 border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20' },
+  {/*{ role: 'Examiner', email: 'examiner@proctorAI.com', password: 'Exam@123',     color: 'text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20' },
+  { role: 'Student',  email: 'student@proctorAI.com',  password: 'Student@123',  color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20' },*/}
 ];
 
 export default function LoginPage() {
@@ -100,11 +100,11 @@ export default function LoginPage() {
           </form>
 
           {/* Divider */}
-          <div className="flex items-center gap-3 my-5">
+          {/* <div className="flex items-center gap-3 my-5"> 
             <div className="flex-1 h-px bg-surface-700" />
             <span className="text-xs text-surface-500 font-medium">Quick demo access</span>
             <div className="flex-1 h-px bg-surface-700" />
-          </div>
+          </div>*/}
 
           {/* Demo buttons */}
           <div className="grid grid-cols-3 gap-2">
