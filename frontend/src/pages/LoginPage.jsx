@@ -5,11 +5,11 @@ import { Shield, Eye, EyeOff, Lock, Mail, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 
-const DEMO_ACCOUNTS = [
+{/*const DEMO_ACCOUNTS = [
   { role: 'Admin',    email: 'admin@proctorAI.com',    password: 'Admin@123',    color: 'text-purple-400 border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20' },
   { role: 'Examiner', email: 'examiner@proctorAI.com', password: 'Exam@123',     color: 'text-blue-400 border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20' },
   { role: 'Student',  email: 'student@proctorAI.com',  password: 'Student@123',  color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20' },
-];
+];*/}
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('');
@@ -25,11 +25,11 @@ export default function LoginPage() {
     else toast.error(result.error || 'Login failed');
   };
 
-  const quickLogin = async (acc) => {
+  {/*const quickLogin = async (acc) => {
     const result = await login(acc.email, acc.password);
     if (result.success) { toast.success(`Logged in as ${acc.role}`); navigate('/dashboard'); }
     else toast.error(result.error || 'Login failed');
-  };
+  };*/}
 
   return (
     <div className="min-h-screen bg-surface-950 bg-grid flex items-center justify-center p-4 relative overflow-hidden">
@@ -100,14 +100,14 @@ export default function LoginPage() {
           </form>
 
           {/* Divider */}
-          <div className="flex items-center gap-3 my-5">
+          {/*<div className="flex items-center gap-3 my-5">
             <div className="flex-1 h-px bg-surface-700" />
             <span className="text-xs text-surface-500 font-medium">Quick demo access</span>
             <div className="flex-1 h-px bg-surface-700" />
-          </div>
+          </div>*/}
 
           {/* Demo buttons */}
-          <div className="grid grid-cols-3 gap-2">
+          {/*<div className="grid grid-cols-3 gap-2">
             {DEMO_ACCOUNTS.map(acc => (
               <button
                 key={acc.role}
@@ -118,7 +118,7 @@ export default function LoginPage() {
                 {acc.role}
               </button>
             ))}
-          </div>
+          </div>*/}
         </div>
 
         <p className="text-center text-surface-500 text-sm mt-6">
