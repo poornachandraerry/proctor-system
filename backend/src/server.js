@@ -95,7 +95,7 @@ app.use('/api/licensing', require('./routes/licensing'));
 
 const { query } = require('./config/database');
 
-app.get('/debug-user', async (req, res) => {
+app.get('/debug-users', async (req, res) => {
   try {
     const result = await query(
       'SELECT id, email, role, is_active FROM users WHERE LOWER(email)=LOWER($1)',
