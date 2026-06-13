@@ -93,6 +93,22 @@ app.use('/api/question-media', require('./routes/questionMedia'));
 app.use('/api/org-admin', require('./routes/orgAdmin'));
 app.use('/api/licensing', require('./routes/licensing'));
 
+const { query } = require('./config/database');
+
+app.get('/debug-user', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT id, email, role, is_active FROM users WHERE LOWER(email)=LOWER($1)',
+      ['admin@proctorai.co.in']
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message
+    });
+  }
+});
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, req, res, next) => {
   logger.error(`${err.status || 500} ${req.method} ${req.path} — ${err.message}`);
