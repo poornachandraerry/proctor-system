@@ -1,414 +1,546 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, AlertTriangle, Camera, Shield, ChevronLeft, ChevronRight, Check, Send } from 'lucide-react';
+import {
+  Clock, ChevronLeft, ChevronRight, CheckCircle,
+  Shield, AlertTriangle, Wifi, WifiOff, Mic, MicOff
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import useAuthStore from '../store/authStore';
-import { getSocket } from '../utils/socket';
 
-export default function ExamTakePage() {
-  const { sessionId } = useParams();
-  const { user, accessToken } = useAuthStore();
-  const navigate = useNavigate();
+// ── Inline Behaviour Tracker ───────────────────────────────
+function useBehaviourTracker(sessionId) {
+  const queue = useRef([]);
+  const currentQ = useRef(null);
+  const questionStart = useRef(null);
 
-  const [session, setSession] = useState(null);
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState({});
-  const [currentQ, setCurrentQ] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [warnings, setWarnings] = useState([]);
-  const [webcamActive, setWebcamActive] = useState(false);
-  const [warningCount, setWarningCount] = useState(0);
-  const [terminated, setTerminated] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const getTimeOnQ = () =>
+    questionStart.current ? Math.round((Date.now() - questionStart.current) / 1000) : 0;
 
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const timerRef = useRef(null);
-  const screenshotRef = useRef(null);
-  const socketRef = useRef(null);
-  const startTimeRef = useRef({});
-
-  // Load session
-  useEffect(() => {
-    const loadSession = async () => {
-      try {
-        const { data: sess } = await api.get(`/sessions/${sessionId}`);
-        setSession(sess);
-        const { data: qs } = await api.get(`/exams/${sess.exam_id}/questions`);
-        setQuestions(qs);
-        setTimeLeft(sess.duration_minutes * 60);
-        startTimeRef.current[qs[0]?.id] = Date.now();
-        setLoading(false);
-        setupWebcam();
-        requestFullscreen();
-        setupEventListeners();
-      } catch (err) {
-        toast.error('Failed to load exam');
-        navigate('/exams');
-      }
-    };
-    loadSession();
-    return () => cleanup();
+  const enqueue = useCallback((eventType, eventData = {}) => {
+    if (!sessionId) return;
+    queue.current.push({
+      sessionId, questionId: currentQ.current,
+      eventType, eventData,
+      timeOnQuestion: getTimeOnQ(),
+      timestamp: new Date().toISOString(),
+    });
   }, [sessionId]);
 
-  // Socket
-  useEffect(() => {
-    if (!accessToken || !session) return;
-    const socket = getSocket(accessToken);
-    socketRef.current = socket;
-    socket.emit('join:session', { sessionId });
-    socket.on('warning:received', ({ message }) => addWarning(message, true));
-    socket.on('session:terminated', ({ reason }) => {
-      setTerminated(true);
-      toast.error(`Exam terminated: ${reason}`);
-    });
-    return () => { socket.off('warning:received'); socket.off('session:terminated'); };
-  }, [accessToken, session]);
+  const flush = useCallback(async () => {
+    if (!queue.current.length) return;
+    const toSend = [...queue.current];
+    queue.current = [];
+    try { await api.post('/behaviour/bulk-log', { events: toSend }); }
+    catch { queue.current = [...toSend, ...queue.current]; }
+  }, []);
 
-  // Timer
   useEffect(() => {
-    if (!timeLeft || loading || terminated || submitted) return;
+    if (!sessionId) return;
+    const id = setInterval(flush, 5000);
+    return () => { clearInterval(id); flush(); };
+  }, [sessionId, flush]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const onVis   = () => enqueue(document.hidden ? 'tab_blurred' : 'tab_focused');
+    const onBlur  = () => enqueue('focus_lost');
+    const onFocus = () => enqueue('focus_gained');
+    const onCopy  = () => enqueue('copy_attempt');
+    const onPaste = () => enqueue('paste_attempt');
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('paste', onPaste);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('paste', onPaste);
+    };
+  }, [sessionId, enqueue]);
+
+  const onQuestionView = useCallback((questionId) => {
+    if (currentQ.current === questionId) return;
+    if (currentQ.current) enqueue('time_spent', { timeSpent: getTimeOnQ() });
+    currentQ.current = questionId;
+    questionStart.current = Date.now();
+    enqueue('viewed');
+  }, [enqueue]);
+
+  const onAnswer = useCallback((isChange = false) => {
+    enqueue(isChange ? 'changed_answer' : 'answered');
+  }, [enqueue]);
+
+  return { onQuestionView, onAnswer };
+}
+
+// ── Inline Audio Capture ───────────────────────────────────
+function useAudioCapture(sessionId, enabled) {
+  const stream    = useRef(null);
+  const recorder  = useRef(null);
+  const chunks    = useRef([]);
+  const clipIdx   = useRef(0);
+  const interval  = useRef(null);
+
+  const upload = useCallback(async (blob, idx) => {
+    if (!blob || blob.size < 1000) return;
+    try {
+      const fd = new FormData();
+      fd.append('audio', blob, `clip_${idx}.webm`);
+      fd.append('clipIndex', String(idx));
+      fd.append('durationS', '60');
+      await api.post(`/audio/session/${sessionId}/upload`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    } catch (e) { console.warn('Audio upload skipped:', e.message); }
+  }, [sessionId]);
+
+  const startClip = useCallback(() => {
+    if (!stream.current || !enabled) return;
+    chunks.current = [];
+    try {
+      const mr = new MediaRecorder(stream.current, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus' : 'audio/webm',
+      });
+      mr.ondataavailable = e => { if (e.data.size > 0) chunks.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunks.current, { type: 'audio/webm' });
+        upload(blob, clipIdx.current++);
+      };
+      mr.start();
+      recorder.current = mr;
+    } catch (e) { console.warn('Recorder error:', e.message); }
+  }, [enabled, upload]);
+
+  const stopClip = useCallback(() => {
+    if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
+  }, []);
+
+  const start = useCallback(async () => {
+    if (!enabled || !sessionId) return;
+    try {
+      stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      startClip();
+      interval.current = setInterval(() => { stopClip(); startClip(); }, 60000);
+    } catch (e) { console.warn('Audio capture unavailable:', e.message); }
+  }, [enabled, sessionId, startClip, stopClip]);
+
+  const stop = useCallback(() => {
+    clearInterval(interval.current);
+    stopClip();
+    if (stream.current) { stream.current.getTracks().forEach(t => t.stop()); stream.current = null; }
+  }, [stopClip]);
+
+  useEffect(() => () => stop(), [stop]);
+  return { start, stop };
+}
+
+// ── Main ExamTakePage ──────────────────────────────────────
+export default function ExamTakePage() {
+  const { sessionId } = useParams();
+  const { user }      = useAuthStore();
+  const navigate      = useNavigate();
+
+  const [session, setSession]     = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [currentQ, setCurrentQ]   = useState(0);
+  const [answers, setAnswers]     = useState({});
+  const [timeLeft, setTimeLeft]   = useState(0);
+  const [loading, setLoading]     = useState(true);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [terminated, setTerminated] = useState(false);
+  const [warnings, setWarnings]   = useState(0);
+  const [online, setOnline]       = useState(navigator.onLine);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+
+  const timerRef  = useRef(null);
+  const webcamRef = useRef(null);
+  const camStream = useRef(null);
+  const aiTimer   = useRef(null);
+
+  const behaviour = useBehaviourTracker(sessionId);
+  const audio     = useAudioCapture(sessionId, audioEnabled);
+
+  // Load session + questions
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const sRes = await api.get(`/sessions/${sessionId}`);
+        const s    = sRes.data;
+        setSession(s);
+        const qRes = await api.get(`/exams/${s.exam_id}/questions`);
+        setQuestions(qRes.data);
+        const elapsed  = Math.round((Date.now() - new Date(s.started_at)) / 1000);
+        const remaining = (s.duration_minutes * 60) - elapsed;
+        setTimeLeft(Math.max(remaining, 0));
+      } catch { toast.error('Failed to load exam'); navigate('/dashboard'); }
+      finally { setLoading(false); }
+    };
+    load();
+  }, [sessionId]);
+
+  // Notify behaviour tracker of question view
+  useEffect(() => {
+    if (questions[currentQ]) behaviour.onQuestionView(questions[currentQ].id);
+  }, [currentQ, questions]);
+
+  // Webcam + audio start
+  useEffect(() => {
+    if (loading || !session) return;
+    const startMedia = async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        camStream.current = s;
+        if (webcamRef.current) webcamRef.current.srcObject = s;
+      } catch { toast.error('Webcam required for this exam'); }
+      audio.start();
+    };
+    startMedia();
+    return () => {
+      if (camStream.current) camStream.current.getTracks().forEach(t => t.stop());
+      audio.stop();
+    };
+  }, [loading, session]);
+
+  // AI frame analysis every 30s
+  useEffect(() => {
+    if (!session?.proctoring_settings?.ai_analysis || submitted) return;
+    aiTimer.current = setInterval(async () => {
+      if (!webcamRef.current || submitted) return;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 320; canvas.height = 240;
+        canvas.getContext('2d').drawImage(webcamRef.current, 0, 0, 320, 240);
+        const b64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+        await api.post('/ai/analyze-frame', { sessionId, imageBase64: b64 });
+      } catch {}
+    }, 30000);
+    return () => clearInterval(aiTimer.current);
+  }, [session, sessionId, submitted]);
+
+  // Countdown timer
+  useEffect(() => {
+    if (loading || submitted || terminated || timeLeft <= 0) return;
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) { handleSubmit(); return 0; }
-        return prev - 1;
+      setTimeLeft(t => {
+        if (t <= 1) { handleSubmit(true); return 0; }
+        return t - 1;
       });
     }, 1000);
     return () => clearInterval(timerRef.current);
-  }, [loading, terminated, submitted]);
+  }, [loading, submitted, terminated]);
 
-  // Periodic screenshot
+  // Online/offline
   useEffect(() => {
-    if (!session || loading) return;
-    const interval = (session.proctoring_settings?.screenshot_interval || 30) * 1000;
-    screenshotRef.current = setInterval(() => captureAndAnalyze(), interval);
-    return () => clearInterval(screenshotRef.current);
-  }, [session, loading]);
+    const on  = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
-  const setupWebcam = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
-      setWebcamActive(true);
-    } catch {
-      addWarning('Webcam access denied. This will be flagged.', true);
-      reportEvent('webcam_denied', {});
-    }
-  };
-
-  const requestFullscreen = () => {
-    try { document.documentElement.requestFullscreen?.(); } catch {}
-  };
-
-  const setupEventListeners = () => {
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('copy', handleCopyPaste);
-    document.addEventListener('paste', handleCopyPaste);
-    document.addEventListener('contextmenu', handleContextMenu);
-    window.addEventListener('blur', handleWindowBlur);
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-  };
-
-  const cleanup = () => {
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    document.removeEventListener('copy', handleCopyPaste);
-    document.removeEventListener('paste', handleCopyPaste);
-    document.removeEventListener('contextmenu', handleContextMenu);
-    window.removeEventListener('blur', handleWindowBlur);
-    document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    clearInterval(timerRef.current);
-    clearInterval(screenshotRef.current);
-  };
-
-  const handleVisibilityChange = () => {
-    if (document.hidden) { reportEvent('tab_switch', {}); addWarning('Tab switch detected!', false); }
-  };
-  const handleWindowBlur = () => { reportEvent('focus_lost', {}); };
-  const handleCopyPaste = (e) => { e.preventDefault(); reportEvent('copy_paste', {}); addWarning('Copy/paste is not allowed!', true); };
-  const handleContextMenu = (e) => e.preventDefault();
-  const handleFullscreenChange = () => {
-    if (!document.fullscreenElement) { reportEvent('fullscreen_exit', {}); addWarning('Please stay in fullscreen mode!', false); }
-  };
-
-  const reportEvent = async (eventType, data) => {
-    try {
-      await api.post(`/sessions/${sessionId}/events`, { eventType, data });
-      socketRef.current?.emit('proctor:event', { sessionId, examId: session?.exam_id, eventType, data });
-      setWarningCount(prev => {
-        const next = prev + 1;
-        const max = session?.proctoring_settings?.max_warnings || 3;
-        if (next >= max && !terminated) { setTerminated(true); toast.error('Maximum warnings reached. Exam terminated.'); api.post(`/sessions/${sessionId}/terminate`, { reason: 'Max warnings exceeded' }); }
-        return next;
-      });
-    } catch {}
-  };
-
-  const addWarning = (message, isFromProctor = false) => {
-    const w = { id: Date.now(), message, isFromProctor, time: new Date().toLocaleTimeString() };
-    setWarnings(prev => [w, ...prev].slice(0, 10));
-    toast.error(message, { duration: 4000 });
-  };
-
-  const captureAndAnalyze = async () => {
-    if (!videoRef.current || !webcamActive) return;
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 320; canvas.height = 240;
-      canvas.getContext('2d').drawImage(videoRef.current, 0, 0, 320, 240);
-      const imageBase64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
-      const { data } = await api.post('/ai/analyze-frame', { sessionId, imageBase64 });
-      if (!data.safe && data.flags?.length > 0) {
-        data.flags.forEach(f => addWarning(`AI Alert: ${f}`, false));
+  // Tab switch detection
+  useEffect(() => {
+    if (!session || submitted) return;
+    const onVis = async () => {
+      if (!document.hidden) return;
+      const nw = warnings + 1;
+      setWarnings(nw);
+      toast.error(`Warning ${nw}: Tab switching detected!`);
+      try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'tab_switch' }); } catch {}
+      const max = session.proctoring_settings?.max_warnings || 3;
+      if (nw >= max) {
+        setTerminated(true);
+        try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Exceeded tab switch limit' }); } catch {}
       }
-    } catch {}
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [warnings, session, sessionId, submitted]);
+
+  // Copy/paste block
+  useEffect(() => {
+    if (!session?.proctoring_settings?.copy_paste_blocked) return;
+    const block = async (e) => {
+      e.preventDefault();
+      toast.error('Copy/paste is not allowed');
+      try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'copy_paste' }); } catch {}
+    };
+    document.addEventListener('copy', block);
+    document.addEventListener('paste', block);
+    return () => { document.removeEventListener('copy', block); document.removeEventListener('paste', block); };
+  }, [session, sessionId]);
+
+  const formatTime = (s) => {
+    const h   = Math.floor(s / 3600);
+    const m   = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+    return `${m}:${sec.toString().padStart(2,'0')}`;
   };
 
   const handleAnswer = (questionId, answer) => {
+    const isChange = !!answers[questionId];
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
+    behaviour.onAnswer(isChange);
   };
 
-  const navigateQuestion = (dir) => {
-    const q = questions[currentQ];
-    if (q) {
-      const timeSpent = Math.round((Date.now() - (startTimeRef.current[q.id] || Date.now())) / 1000);
-      startTimeRef.current[questions[currentQ + dir]?.id] = Date.now();
-    }
-    setCurrentQ(prev => Math.max(0, Math.min(questions.length - 1, prev + dir)));
-  };
-
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async (auto = false) => {
     if (submitting || submitted) return;
-    if (!confirm('Submit exam? You cannot change your answers after submission.')) return;
+    if (!auto && !confirm('Submit exam? You cannot change answers after submitting.')) return;
     setSubmitting(true);
+    clearInterval(timerRef.current);
+    audio.stop();
     try {
-      const answerArray = Object.entries(answers).map(([questionId, answer]) => ({
-        questionId,
-        answer,
-        timeSpent: Math.round((Date.now() - (startTimeRef.current[questionId] || Date.now())) / 1000),
-      }));
-      await api.post(`/sessions/${sessionId}/submit`, { answers: answerArray });
+      const formatted = Object.entries(answers).map(([questionId, answer]) => ({ questionId, answer, timeSpent: 0 }));
+      await api.post(`/sessions/${sessionId}/submit`, { answers: formatted });
       setSubmitted(true);
-      cleanup();
-      if (document.fullscreenElement) document.exitFullscreen?.();
-    } catch { toast.error('Submission failed. Try again.'); setSubmitting(false); }
-  };
+    } catch (err) { toast.error(err.response?.data?.error || 'Submission failed'); }
+    finally { setSubmitting(false); }
+  }, [sessionId, answers, submitting, submitted, audio]);
 
-  const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-  const isLowTime = timeLeft < 300;
-
+  // ── Screens ────────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-surface-950 flex items-center justify-center">
-      <div className="text-center"><div className="w-12 h-12 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" /><p className="text-surface-400">Loading exam...</p></div>
-    </div>
-  );
-
-  if (submitted) return (
-    <div className="min-h-screen bg-surface-950 flex items-center justify-center p-4">
-      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center max-w-md">
-        <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-6 border-2 border-emerald-500">
-          <Check size={36} className="text-emerald-400" />
-        </div>
-        <h1 className="font-display text-3xl font-bold text-white mb-3">Exam Submitted!</h1>
-        <p className="text-surface-400 mb-2">Your answers have been recorded.</p>
-        <p className="text-surface-400 mb-6">Answered: {Object.keys(answers).length} / {questions.length} questions</p>
-        <div className="flex flex-col gap-3 items-center">
-          <button onClick={() => navigate(`/results/${sessionId}`)} className="btn-primary mx-auto">
-            View Your Result
-          </button>
-          <button onClick={() => navigate('/dashboard')} className="btn-secondary mx-auto">Back to Dashboard</button>
-        </div>
-      </motion.div>
+      <div className="w-12 h-12 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"/>
     </div>
   );
 
   if (terminated) return (
     <div className="min-h-screen bg-surface-950 flex items-center justify-center p-4">
-      <div className="text-center max-w-md">
-        <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-6 border-2 border-red-500">
-          <AlertTriangle size={36} className="text-red-400" />
-        </div>
-        <h1 className="font-display text-3xl font-bold text-white mb-3">Exam Terminated</h1>
-        <p className="text-surface-400 mb-8">Your exam session has been ended due to policy violations.</p>
+      <div className="glass rounded-2xl p-10 max-w-md text-center border border-red-500/30 bg-red-500/5">
+        <AlertTriangle size={52} className="text-red-400 mx-auto mb-4"/>
+        <h2 className="font-display text-2xl font-bold text-white mb-3">Session Terminated</h2>
+        <p className="text-surface-400 mb-6">Your exam session has been terminated due to repeated violations.</p>
         <button onClick={() => navigate('/dashboard')} className="btn-secondary mx-auto">Back to Dashboard</button>
       </div>
     </div>
   );
 
-  const currentQuestion = questions[currentQ];
+  if (submitted) return (
+    <div className="min-h-screen bg-surface-950 bg-dot flex items-center justify-center p-4">
+      <motion.div initial={{ opacity:0, scale:0.95 }} animate={{ opacity:1, scale:1 }}
+        className="glass rounded-2xl p-10 max-w-md text-center border border-emerald-500/30 bg-emerald-500/5">
+        <CheckCircle size={56} className="text-emerald-400 mx-auto mb-4"/>
+        <h2 className="font-display text-3xl font-bold text-white mb-2">Exam Submitted!</h2>
+        <p className="text-surface-400 mb-2">Your answers have been recorded.</p>
+        <p className="text-surface-400 mb-8">
+          Answered: {Object.keys(answers).length} / {questions.length} questions
+        </p>
+        <div className="flex flex-col gap-3">
+          <button onClick={() => navigate(`/results/${sessionId}`)} className="btn-primary mx-auto">
+            <CheckCircle size={16}/>View Your Result
+          </button>
+          <button onClick={() => navigate('/dashboard')} className="btn-secondary mx-auto">
+            Back to Dashboard
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
 
+  const q       = questions[currentQ];
+  const urgent  = timeLeft <= 300 && timeLeft > 0;
+  const answered = Object.keys(answers).length;
+
+  // ── Main exam UI ───────────────────────────────────────
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col" onContextMenu={e => e.preventDefault()}>
+    <div className="min-h-screen bg-surface-950 flex flex-col" style={{ userSelect:'none' }}>
       {/* Top bar */}
-      <div className="bg-surface-900 border-b border-surface-800 px-6 py-3 flex items-center gap-4 shrink-0">
+      <div className="bg-surface-900 border-b border-surface-800 px-4 py-2.5 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <Shield size={18} className="text-primary-400" />
-          <span className="font-display font-semibold text-white text-sm">{session?.exam_title}</span>
+          <Shield size={16} className="text-primary-400"/>
+          <span className="text-sm font-semibold text-white font-heading truncate max-w-[200px]">
+            {session?.exam_title}
+          </span>
         </div>
-        <div className={`flex items-center gap-2 ml-auto font-mono font-bold text-lg ${isLowTime ? 'text-red-400 animate-pulse' : 'text-white'}`}>
-          <Clock size={18} />{formatTime(timeLeft)}
-        </div>
-        <div className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border ${webcamActive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}`}>
-          <Camera size={12} />{webcamActive ? 'Webcam Active' : 'No Webcam'}
-        </div>
-        {warningCount > 0 && (
-          <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/30">
-            <AlertTriangle size={12} />{warningCount} warning{warningCount !== 1 ? 's' : ''}
+        {warnings > 0 && (
+          <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded-lg border border-red-500/20">
+            <AlertTriangle size={12}/>
+            {warnings} warning{warnings > 1 ? 's' : ''}
           </div>
         )}
-        <button onClick={handleSubmit} disabled={submitting} className="btn-primary text-sm py-2">
-          <Send size={14} />{submitting ? 'Submitting...' : 'Submit Exam'}
-        </button>
+        <div className="ml-auto flex items-center gap-4">
+          <div className={`flex items-center gap-1 text-xs ${online ? 'text-emerald-400' : 'text-red-400'}`}>
+            {online ? <Wifi size={13}/> : <WifiOff size={13}/>}
+          </div>
+          <div className={`flex items-center gap-1 text-xs ${audioEnabled ? 'text-primary-400' : 'text-surface-500'}`}>
+            {audioEnabled ? <Mic size={13}/> : <MicOff size={13}/>}
+          </div>
+          <div className={`text-lg font-mono font-bold px-3 py-1 rounded-lg ${
+            urgent ? 'text-red-400 bg-red-500/10 animate-pulse border border-red-500/20' : 'text-primary-300'
+          }`}>{formatTime(timeLeft)}</div>
+          <span className="text-xs text-surface-400">{answered}/{questions.length}</span>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-1 bg-surface-800">
+        <div className="h-1 bg-primary-500 transition-all duration-500"
+          style={{ width: `${questions.length ? (answered / questions.length) * 100 : 0}%` }}/>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Question panel */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Question nav */}
-          <div className="bg-surface-900/50 border-b border-surface-800 px-6 py-3 flex items-center gap-2 overflow-x-auto shrink-0">
-            {questions.map((q, i) => (
-              <button
-                key={q.id}
-                onClick={() => setCurrentQ(i)}
-                className={`w-8 h-8 rounded-lg text-xs font-medium shrink-0 transition-all ${i === currentQ ? 'bg-primary-600 text-white' : answers[q.id] ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-surface-800 text-surface-400 hover:bg-surface-700'}`}
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
+        {/* Question area */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {q && (
+            <AnimatePresence mode="wait">
+              <motion.div key={currentQ}
+                initial={{ opacity:0, x:20 }} animate={{ opacity:1, x:0 }}
+                exit={{ opacity:0, x:-20 }} transition={{ duration:0.2 }}
+                className="max-w-3xl mx-auto">
 
-          {/* Question content */}
-          <div className="flex-1 overflow-y-auto p-8">
-            {currentQuestion && (
-              <AnimatePresence mode="wait">
-                <motion.div key={currentQuestion.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
-                  <div className="max-w-3xl">
-                    <div className="flex items-center gap-3 mb-6">
-                      <span className="text-xs font-mono text-primary-400 bg-primary-500/10 px-3 py-1 rounded-full">Q{currentQ + 1} of {questions.length}</span>
-                      <span className="text-xs text-surface-400">{currentQuestion.marks} mark{currentQuestion.marks !== 1 ? 's' : ''}</span>
-                      <span className={`text-xs capitalize ${currentQuestion.difficulty === 'hard' ? 'text-red-400' : currentQuestion.difficulty === 'medium' ? 'text-yellow-400' : 'text-green-400'}`}>{currentQuestion.difficulty}</span>
-                    </div>
+                <div className="flex items-center gap-3 mb-5">
+                  <span className="text-sm font-semibold text-primary-400 font-mono">
+                    Q{currentQ+1}/{questions.length}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full border capitalize ${
+                    q.difficulty === 'hard'   ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                    q.difficulty === 'medium' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                    'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  }`}>{q.difficulty}</span>
+                  {q.topic && (
+                    <span className="text-xs text-surface-500 bg-surface-800 px-2 py-0.5 rounded">{q.topic}</span>
+                  )}
+                  <span className="text-xs text-surface-500 ml-auto">{q.marks} mark{q.marks !== 1 ? 's' : ''}</span>
+                </div>
 
-                    <p className="text-white text-lg leading-relaxed mb-8 font-medium">{currentQuestion.question_text}</p>
+                <div className="glass rounded-2xl p-6 mb-5 border border-surface-700">
+                  {q.question_html
+                    ? <div className="text-surface-100 leading-relaxed" dangerouslySetInnerHTML={{ __html: q.question_html }}/>
+                    : <p className="text-base text-surface-100 leading-relaxed">{q.question_text}</p>
+                  }
+                </div>
 
-                    {/* MCQ options */}
-                    {(currentQuestion.question_type === 'mcq' || currentQuestion.question_type === 'true_false') && currentQuestion.options && (
-                      <div className="space-y-3">
-                        {currentQuestion.options.map((opt) => {
-                          const selected = answers[currentQuestion.id] === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              onClick={() => handleAnswer(currentQuestion.id, opt.id)}
-                              className={`w-full text-left p-4 rounded-xl border transition-all duration-200 flex items-center gap-3 ${selected ? 'bg-primary-600/20 border-primary-500 text-primary-200' : 'bg-surface-800 border-surface-700 text-surface-200 hover:border-primary-500/50 hover:bg-surface-700'}`}
-                            >
-                              <span className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs font-bold shrink-0 ${selected ? 'bg-primary-500 border-primary-500 text-white' : 'border-surface-600 text-surface-400'}`}>{opt.id.toUpperCase()}</span>
-                              <span className="text-sm">{opt.text}</span>
-                              {selected && <Check size={16} className="ml-auto text-primary-400" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Essay */}
-                    {currentQuestion.question_type === 'essay' && (
-                      <textarea
-                        value={answers[currentQuestion.id] || ''}
-                        onChange={e => handleAnswer(currentQuestion.id, e.target.value)}
-                        className="input w-full"
-                        rows={10}
-                        placeholder="Write your answer here..."
-                      />
-                    )}
-
-                    {/* Short answer */}
-                    {currentQuestion.question_type === 'short_answer' && (
-                      <input
-                        type="text"
-                        value={answers[currentQuestion.id] || ''}
-                        onChange={e => handleAnswer(currentQuestion.id, e.target.value)}
-                        className="input w-full"
-                        placeholder="Your answer..."
-                      />
-                    )}
-
-                    {/* Code */}
-                    {currentQuestion.question_type === 'code' && (
-                      <textarea
-                        value={answers[currentQuestion.id] || ''}
-                        onChange={e => handleAnswer(currentQuestion.id, e.target.value)}
-                        className="w-full bg-surface-900 border border-surface-700 rounded-xl p-4 text-emerald-300 font-mono text-sm focus:outline-none focus:border-primary-500 resize-none"
-                        rows={14}
-                        placeholder="// Write your code here..."
-                        spellCheck={false}
-                      />
-                    )}
-
-                    {/* Nav */}
-                    <div className="flex items-center justify-between mt-8 pt-6 border-t border-surface-800">
-                      <button onClick={() => navigateQuestion(-1)} disabled={currentQ === 0} className="btn-secondary disabled:opacity-40">
-                        <ChevronLeft size={16} /> Previous
-                      </button>
-                      <span className="text-sm text-surface-500">{Object.keys(answers).length}/{questions.length} answered</span>
-                      {currentQ < questions.length - 1 ? (
-                        <button onClick={() => navigateQuestion(1)} className="btn-primary"><ChevronRight size={16} /> Next</button>
-                      ) : (
-                        <button onClick={handleSubmit} disabled={submitting} className="btn-primary bg-emerald-600 hover:bg-emerald-500">
-                          <Send size={16} />Submit Exam
+                {(q.question_type === 'mcq' || q.question_type === 'true_false') && q.options && (
+                  <div className="space-y-3">
+                    {q.options.map(opt => {
+                      const selected = answers[q.id] === opt.id;
+                      return (
+                        <button key={opt.id} onClick={() => handleAnswer(q.id, opt.id)}
+                          className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all duration-200 ${
+                            selected
+                              ? 'border-primary-500/60 bg-primary-500/15 shadow-lg shadow-primary-500/10'
+                              : 'border-surface-700 bg-surface-800/50 hover:border-primary-500/30 hover:bg-primary-500/5'
+                          }`}>
+                          <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm font-bold shrink-0 transition-colors ${
+                            selected ? 'border-primary-500 bg-primary-500 text-white' : 'border-surface-600 text-surface-400'
+                          }`}>{opt.id.toUpperCase()}</div>
+                          <span className={`text-sm flex-1 ${selected ? 'text-white' : 'text-surface-300'}`}>{opt.text}</span>
+                          {selected && <CheckCircle size={18} className="text-primary-400 shrink-0"/>}
                         </button>
-                      )}
-                    </div>
+                      );
+                    })}
                   </div>
-                </motion.div>
-              </AnimatePresence>
-            )}
-          </div>
+                )}
+
+                {q.question_type === 'short_answer' && (
+                  <textarea value={answers[q.id] || ''}
+                    onChange={e => handleAnswer(q.id, e.target.value)}
+                    className="input resize-none w-full" rows={4} placeholder="Type your answer here..."/>
+                )}
+
+                {q.question_type === 'essay' && (
+                  <textarea value={answers[q.id] || ''}
+                    onChange={e => handleAnswer(q.id, e.target.value)}
+                    className="input resize-none w-full" rows={8} placeholder="Write your detailed answer here..."/>
+                )}
+
+                {q.question_type === 'code' && (
+                  <textarea value={answers[q.id] || ''}
+                    onChange={e => handleAnswer(q.id, e.target.value)}
+                    className="input resize-none w-full font-mono text-sm" rows={10} placeholder="// Write your code here..."/>
+                )}
+
+                <div className="flex items-center justify-between mt-6">
+                  <button onClick={() => setCurrentQ(p => Math.max(0, p-1))}
+                    disabled={currentQ === 0} className="btn-secondary disabled:opacity-40">
+                    <ChevronLeft size={16}/>Previous
+                  </button>
+                  {answers[q.id] && (
+                    <button onClick={() => setAnswers(p => { const n={...p}; delete n[q.id]; return n; })}
+                      className="text-xs text-surface-500 hover:text-red-400 transition-colors">
+                      Clear Answer
+                    </button>
+                  )}
+                  {currentQ < questions.length - 1 ? (
+                    <button onClick={() => setCurrentQ(p => p+1)} className="btn-primary">
+                      Next<ChevronRight size={16}/>
+                    </button>
+                  ) : (
+                    <button onClick={() => handleSubmit()} disabled={submitting} className="btn-success">
+                      {submitting
+                        ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>
+                        : <CheckCircle size={16}/>
+                      }
+                      Submit Exam
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          )}
         </div>
 
-        {/* Right panel - webcam + warnings */}
-        <div className="w-72 bg-surface-900 border-l border-surface-800 flex flex-col shrink-0">
+        {/* Sidebar */}
+        <div className="w-56 bg-surface-900 border-l border-surface-800 flex flex-col shrink-0">
           {/* Webcam */}
-          <div className="p-4 border-b border-surface-800">
-            <p className="text-xs text-surface-400 mb-2 flex items-center gap-1.5"><Camera size={12} />Live Monitoring</p>
-            <div className="aspect-video bg-surface-800 rounded-xl overflow-hidden relative">
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-              {!webcamActive && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center"><Camera size={24} className="text-surface-600 mx-auto mb-1" /><p className="text-xs text-surface-500">No camera</p></div>
+          <div className="p-3 border-b border-surface-800">
+            <div className="relative rounded-xl overflow-hidden bg-surface-800 aspect-video">
+              <video ref={webcamRef} autoPlay muted playsInline className="w-full h-full object-cover"/>
+              <div className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
+              <div className="absolute bottom-1.5 right-1.5 text-xs text-white bg-black/60 px-1 rounded font-mono">LIVE</div>
+            </div>
+            <p className="text-xs text-surface-500 text-center mt-1.5">AI Monitoring Active</p>
+          </div>
+
+          {/* Question navigator */}
+          <div className="flex-1 overflow-y-auto p-3">
+            <p className="text-xs font-semibold text-surface-500 mb-2 font-heading uppercase tracking-wider">Questions</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {questions.map((qs, i) => (
+                <button key={i} onClick={() => setCurrentQ(i)}
+                  className={`h-8 rounded-lg text-xs font-mono font-bold transition-all ${
+                    i === currentQ
+                      ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30'
+                      : answers[qs.id]
+                      ? 'bg-emerald-500/25 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
+                  }`}>{i+1}</button>
+              ))}
+            </div>
+            <div className="mt-3 space-y-1.5">
+              {[
+                { color:'bg-primary-600', label:'Current' },
+                { color:'bg-emerald-500/25 border border-emerald-500/30', label:'Answered' },
+                { color:'bg-surface-800', label:'Unanswered' },
+              ].map(({ color, label }) => (
+                <div key={label} className="flex items-center gap-2 text-xs text-surface-500">
+                  <div className={`w-3 h-3 rounded ${color}`}/>{label}
                 </div>
-              )}
-              {webcamActive && (
-                <div className="absolute top-2 right-2 flex items-center gap-1 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
-                  <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />REC
-                </div>
-              )}
+              ))}
             </div>
           </div>
 
-          {/* Warnings */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <p className="text-xs text-surface-400 mb-3 flex items-center gap-1.5"><AlertTriangle size={12} />Alerts ({warnings.length})</p>
-            {warnings.length === 0 ? (
-              <div className="text-center py-8">
-                <Shield size={24} className="text-emerald-600 mx-auto mb-2" />
-                <p className="text-xs text-surface-500">No issues detected</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {warnings.map(w => (
-                  <div key={w.id} className={`p-3 rounded-xl text-xs ${w.isFromProctor ? 'bg-red-500/20 border border-red-500/30 text-red-300' : 'bg-orange-500/10 border border-orange-500/20 text-orange-300'}`}>
-                    <p className="font-medium">{w.message}</p>
-                    <p className="text-surface-500 mt-0.5">{w.time}</p>
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Submit */}
+          <div className="p-3 border-t border-surface-800">
+            <button onClick={() => handleSubmit()} disabled={submitting}
+              className="btn-primary w-full justify-center text-sm py-2.5">
+              {submitting
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>
+                : <CheckCircle size={15}/>
+              }
+              Submit Exam
+            </button>
+            <p className="text-xs text-surface-600 text-center mt-1.5">
+              {answered} of {questions.length} answered
+            </p>
           </div>
         </div>
       </div>

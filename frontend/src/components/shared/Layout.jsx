@@ -3,33 +3,37 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, FileText, Users, AlertTriangle,
-  Shield, LogOut, Menu, X, Key, Building2, Award
+  Shield, LogOut, Menu, X, Key, Building2, Database
 } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
 
 const NAV = {
   admin: [
-    { to:'/dashboard', icon:LayoutDashboard, label:'Dashboard'   },
-    { to:'/exams',     icon:FileText,        label:'Exams'       },
-    { to:'/alerts',    icon:AlertTriangle,   label:'Alerts'      },
-    { to:'/users',     icon:Users,           label:'Users'       },
-    { to:'/licensing', icon:Key,             label:'Licensing',  highlight:true },
+    { to:'/dashboard',      icon:LayoutDashboard, label:'Dashboard'      },
+    { to:'/exams',          icon:FileText,        label:'Exams'          },
+    { to:'/question-banks', icon:Database,        label:'Question Banks' },
+    { to:'/alerts',         icon:AlertTriangle,   label:'Alerts'         },
+    { to:'/users',          icon:Users,           label:'Users'          },
+    { to:'/licensing',      icon:Key,             label:'Licensing', highlight:true },
   ],
   org_admin: [
-    { to:'/dashboard', icon:LayoutDashboard, label:'Dashboard'     },
-    { to:'/exams',     icon:FileText,        label:'Exams'         },
-    { to:'/org-admin', icon:Building2,       label:'Manage Users', highlight:true },
-    { to:'/alerts',    icon:AlertTriangle,   label:'Alerts'        },
+    { to:'/dashboard',      icon:LayoutDashboard, label:'Dashboard'      },
+    { to:'/exams',          icon:FileText,        label:'Exams'          },
+    { to:'/question-banks', icon:Database,        label:'Question Banks' },
+    { to:'/org-admin',      icon:Building2,       label:'Manage Users',  highlight:true },
+    { to:'/alerts',         icon:AlertTriangle,   label:'Alerts'         },
   ],
   examiner: [
-    { to:'/dashboard', icon:LayoutDashboard, label:'Dashboard' },
-    { to:'/exams',     icon:FileText,        label:'My Exams'  },
-    { to:'/alerts',    icon:AlertTriangle,   label:'Alerts'    },
+    { to:'/dashboard',      icon:LayoutDashboard, label:'Dashboard'      },
+    { to:'/exams',          icon:FileText,        label:'My Exams'       },
+    { to:'/question-banks', icon:Database,        label:'Question Banks' },
+    { to:'/alerts',         icon:AlertTriangle,   label:'Alerts'         },
   ],
   student: [
-    { to:'/dashboard', icon:LayoutDashboard, label:'Dashboard'       },
-    { to:'/exams',     icon:FileText,        label:'Available Exams' },
+    { to:'/dashboard',      icon:LayoutDashboard, label:'Dashboard'       },
+    { to:'/exams',          icon:FileText,        label:'Available Exams' },
+    { to:'/question-banks', icon:Database,        label:'Practice Tests'  },
   ],
 };
 
@@ -61,7 +65,12 @@ export default function Layout() {
           </div>
           <AnimatePresence>
             {open && (
-              <motion.div initial={{opacity:0,x:-10}} animate={{opacity:1,x:0}} exit={{opacity:0}} transition={{duration:0.2}}>
+              <motion.div
+                initial={{ opacity:0, x:-10 }}
+                animate={{ opacity:1, x:0 }}
+                exit={{ opacity:0 }}
+                transition={{ duration:0.2 }}
+              >
                 <div className="font-display font-bold text-white text-lg leading-none">ProctorAI</div>
                 <div className="text-xs text-surface-400 font-medium mt-0.5 capitalize">
                   {user?.role === 'org_admin' ? 'Organisation Admin' : user?.role}
@@ -69,16 +78,20 @@ export default function Layout() {
               </motion.div>
             )}
           </AnimatePresence>
-          <button onClick={() => setOpen(!open)}
-            className="ml-auto text-surface-400 hover:text-white transition-colors shrink-0 p-1 rounded-lg hover:bg-surface-700">
+          <button
+            onClick={() => setOpen(!open)}
+            className="ml-auto text-surface-400 hover:text-white transition-colors shrink-0 p-1 rounded-lg hover:bg-surface-700"
+          >
             {open ? <X size={16}/> : <Menu size={16}/>}
           </button>
         </div>
 
-        {/* Nav */}
+        {/* Nav links */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto overflow-x-hidden">
           {items.map(({ to, icon: Icon, label, highlight }) => (
-            <NavLink key={to} to={to}
+            <NavLink
+              key={to}
+              to={to}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                   isActive
@@ -87,18 +100,27 @@ export default function Layout() {
                     ? 'text-amber-300 hover:text-amber-200 hover:bg-amber-500/10 border border-amber-500/20'
                     : 'text-surface-300 hover:text-white hover:bg-surface-700/60'
                 }`
-              }>
+              }
+            >
               <Icon size={18} className="shrink-0"/>
               <AnimatePresence>
                 {open && (
-                  <motion.span initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:0.15}}>
+                  <motion.span
+                    initial={{ opacity:0 }}
+                    animate={{ opacity:1 }}
+                    exit={{ opacity:0 }}
+                    transition={{ duration:0.15 }}
+                  >
                     {label}
                   </motion.span>
                 )}
               </AnimatePresence>
               {highlight && open && (
-                <motion.span initial={{opacity:0}} animate={{opacity:1}}
-                  className="ml-auto text-xs bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full">
+                <motion.span
+                  initial={{ opacity:0 }}
+                  animate={{ opacity:1 }}
+                  className="ml-auto text-xs bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full"
+                >
                   {user?.role === 'admin' ? 'Pro' : 'Manage'}
                 </motion.span>
               )}
@@ -114,18 +136,33 @@ export default function Layout() {
             </div>
             <AnimatePresence>
               {open && (
-                <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="flex-1 overflow-hidden">
-                  <div className="text-sm font-medium text-white truncate">{user?.firstName} {user?.lastName}</div>
-                  <div className="text-xs text-surface-400 capitalize">{user?.role?.replace('_',' ')}</div>
+                <motion.div
+                  initial={{ opacity:0 }}
+                  animate={{ opacity:1 }}
+                  exit={{ opacity:0 }}
+                  className="flex-1 overflow-hidden"
+                >
+                  <div className="text-sm font-medium text-white truncate">
+                    {user?.firstName} {user?.lastName}
+                  </div>
+                  <div className="text-xs text-surface-400 capitalize">
+                    {user?.role?.replace('_', ' ')}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-          <button onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-surface-400 hover:text-red-400 hover:bg-red-500/10 transition-all">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-surface-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          >
             <LogOut size={16} className="shrink-0"/>
             <AnimatePresence>
-              {open && <motion.span initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>Sign Out</motion.span>}
+              {open && (
+                <motion.span initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}>
+                  Sign Out
+                </motion.span>
+              )}
             </AnimatePresence>
           </button>
         </div>
