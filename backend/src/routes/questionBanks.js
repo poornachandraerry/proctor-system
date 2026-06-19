@@ -1,8 +1,21 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const ctrl = require('../controllers/questionBankController');
+const { generateBankQuestionsTemplate } = require('../services/bankExcelService');
 
 router.use(authenticate);
+
+// Download blank question upload template (staff only)
+router.get('/questions/template', authorize('admin','org_admin','examiner'), async (req, res) => {
+  try {
+    const buffer = await generateBankQuestionsTemplate();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="ProctorAI_QuestionBank_Upload_Template.xlsx"');
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate template' });
+  }
+});
 
 // Banks — students see public; staff manage
 router.get('/',    ctrl.getBanks);
