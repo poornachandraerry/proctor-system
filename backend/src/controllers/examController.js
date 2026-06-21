@@ -9,7 +9,21 @@ async function getExams(req, res) {
     const params = [];
 
     if (req.user.role === 'student') {
-      conditions.push(`e.status = 'published'`);
+      // FIX (Issue #4): same leak as dashboard — restrict to exams the
+      // student is enrolled in, OR open exams created within their own org.
+      params.push(req.user.id);
+      params.push(req.user.org_id || null);
+      conditions.push(`
+        e.status = 'published'
+        AND (
+          EXISTS (SELECT 1 FROM exam_enrollments ee WHERE ee.exam_id = e.id AND ee.user_id = $${params.length - 1})
+          OR (
+            e.access_type = 'open'
+            AND $${params.length}::uuid IS NOT NULL
+            AND creator.org_id = $${params.length}::uuid
+          )
+        )
+      `);
     } else if (req.user.role === 'examiner' || req.user.role === 'org_admin') {
       conditions.push(`e.created_by = $${params.length + 1}`);
       params.push(req.user.id);
@@ -23,13 +37,20 @@ async function getExams(req, res) {
     const countParams = [...params];
     params.push(limit, offset);
 
-    const countResult = await query(`SELECT COUNT(*) FROM exams e ${where}`, countParams);
+    const countResult = await query(`
+      SELECT COUNT(*) FROM exams e
+      LEFT JOIN users creator ON e.created_by = creator.id
+      ${where}
+    `, countParams);
+
     const result = await query(`
       SELECT e.*, u.first_name || ' ' || u.last_name as creator_name,
         (SELECT COUNT(*) FROM questions WHERE exam_id = e.id) as question_count,
         (SELECT COUNT(*) FROM exam_enrollments WHERE exam_id = e.id) as enrolled_count,
         (SELECT COUNT(*) FROM exam_sessions WHERE exam_id = e.id AND status = 'active') as active_sessions
-      FROM exams e LEFT JOIN users u ON e.created_by = u.id
+      FROM exams e
+      LEFT JOIN users u ON e.created_by = u.id
+      LEFT JOIN users creator ON e.created_by = creator.id
       ${where} ORDER BY e.created_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
@@ -51,7 +72,26 @@ async function getExam(req, res) {
       FROM exams e LEFT JOIN users u ON e.created_by = u.id WHERE e.id = $1
     `, [id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Exam not found' });
-    res.json(result.rows[0]);
+
+    const exam = result.rows[0];
+
+    // FIX (Issue #4): block direct access by URL/ID too, not just hide from list
+    if (req.user.role === 'student') {
+      const enrolled = await query(
+        'SELECT 1 FROM exam_enrollments WHERE exam_id=$1 AND user_id=$2', [id, req.user.id]
+      );
+      if (!enrolled.rows.length) {
+        const creatorOrg = await query('SELECT org_id FROM users WHERE id=$1', [exam.created_by]);
+        const sameOrgOpen = exam.access_type === 'open'
+          && req.user.org_id
+          && creatorOrg.rows[0]?.org_id === req.user.org_id;
+        if (!sameOrgOpen) {
+          return res.status(403).json({ error: 'You do not have access to this exam' });
+        }
+      }
+    }
+
+    res.json(exam);
   } catch { res.status(500).json({ error: 'Failed to fetch exam' }); }
 }
 

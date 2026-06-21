@@ -12,23 +12,17 @@ async function startSession(req, res) {
     const exam = await query("SELECT * FROM exams WHERE id=$1 AND status='published'", [examId]);
     if (!exam.rows.length) return res.status(404).json({ error: 'Exam not found or not available' });
 
-    // Resume existing active session
     const existing = await query(
       "SELECT id, status FROM exam_sessions WHERE exam_id=$1 AND user_id=$2 AND status='active'",
       [examId, userId]
     );
     if (existing.rows.length) return res.json({ sessionId: existing.rows[0].id, resumed: true });
 
-    // ── LICENSING ENFORCEMENT ────────────────────────────────
-    // Only enforce if user belongs to an org
     if (req.user.org_id) {
       const limits = await getOrgLimits(userId);
-
-      // 1. Check licence validity
       const validity = isLicenseValid(limits);
       if (!validity.valid) return res.status(403).json({ error: validity.reason, code: 'LICENSE_INVALID' });
 
-      // 2. Check concurrent session limit
       const concCheck = await checkConcurrentLimit(limits.org_id, limits.max_concurrent);
       if (!concCheck.allowed) {
         return res.status(429).json({
@@ -75,25 +69,45 @@ async function updateSessionEvent(req, res) {
     const { id } = req.params;
     const { eventType, data } = req.body;
     const updates = {};
-    if (eventType === 'tab_switch')      updates.tab_switches           = 'tab_switches + 1';
-    if (eventType === 'fullscreen_exit') updates.fullscreen_exits       = 'fullscreen_exits + 1';
-    if (eventType === 'copy_paste')      updates.copy_paste_attempts    = 'copy_paste_attempts + 1';
-    if (eventType === 'focus_lost')      updates.focus_lost_count       = 'focus_lost_count + 1';
-    if (eventType === 'multiple_faces')  updates.multiple_faces_detected= 'multiple_faces_detected + 1';
-    if (eventType === 'gaze_away')       updates.gaze_away_count        = 'gaze_away_count + 1';
+
+    if (eventType === 'tab_switch')       updates.tab_switches            = 'tab_switches + 1';
+    if (eventType === 'fullscreen_exit')  updates.fullscreen_exits        = 'fullscreen_exits + 1';
+    if (eventType === 'copy_paste')       updates.copy_paste_attempts     = 'copy_paste_attempts + 1';
+    if (eventType === 'focus_lost')       updates.focus_lost_count        = 'focus_lost_count + 1';
+    if (eventType === 'multiple_faces')   updates.multiple_faces_detected = 'multiple_faces_detected + 1';
+    if (eventType === 'gaze_away')        updates.gaze_away_count         = 'gaze_away_count + 1';
+    if (eventType === 'camera_blocked')   updates.camera_blocked_count    = 'COALESCE(camera_blocked_count,0) + 1';
 
     let setClause = 'total_suspicious_events = total_suspicious_events + 1, updated_at = NOW()';
     for (const [col, expr] of Object.entries(updates)) setClause += `, ${col} = ${expr}`;
     await query(`UPDATE exam_sessions SET ${setClause} WHERE id = $1`, [id]);
 
-    const severityMap = { tab_switch:'high', fullscreen_exit:'medium', copy_paste:'high', multiple_faces:'critical', gaze_away:'low', focus_lost:'medium' };
+    const severityMap = {
+      tab_switch:      'high',
+      fullscreen_exit:  'high',
+      copy_paste:       'high',
+      multiple_faces:   'critical',
+      gaze_away:        'low',
+      focus_lost:       'medium',
+      camera_blocked:   'critical',
+    };
     const severity = severityMap[eventType] || 'low';
+
     const session = await query('SELECT exam_id, user_id FROM exam_sessions WHERE id = $1', [id]);
     if (session.rows.length) {
       const { exam_id, user_id } = session.rows[0];
+      const descriptions = {
+        tab_switch:     'Student switched away from the exam tab',
+        fullscreen_exit: 'Student exited fullscreen mode during the exam',
+        copy_paste:      'Copy or paste attempt detected',
+        multiple_faces:  'Multiple faces detected in webcam',
+        gaze_away:       'Student looked away from screen for an extended period',
+        focus_lost:      'Browser window lost focus',
+        camera_blocked:  'Webcam appears blocked, covered, or showing a dark/uniform frame',
+      };
       await query(
         'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [id, user_id, exam_id, eventType, severity, `${eventType} detected`, JSON.stringify(data || {})]
+        [id, user_id, exam_id, eventType, severity, descriptions[eventType] || `${eventType} detected`, JSON.stringify(data || {})]
       );
     }
     res.json({ success: true });
@@ -121,7 +135,6 @@ async function submitSession(req, res) {
         }
       }
     });
-    // Auto-grade MCQs
     const sessionRes = await query('SELECT exam_id FROM exam_sessions WHERE id=$1', [id]);
     if (sessionRes.rows.length) {
       const examId = sessionRes.rows[0].exam_id;

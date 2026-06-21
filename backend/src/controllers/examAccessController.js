@@ -1,7 +1,7 @@
 const { query } = require('../config/database');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
-const { sendEmail, examInviteTemplate } = require('../services/emailService');
+const { sendEmail, examInviteTemplate, testEmailConfig, smtpConfigured } = require('../services/emailService');
 
 // ── Email Whitelist ────────────────────────────────────────
 async function getEmailWhitelist(req, res) {
@@ -22,7 +22,6 @@ async function addEmailsToWhitelist(req, res) {
     if (!Array.isArray(emails) || !emails.length)
       return res.status(400).json({ error: 'Emails array required' });
 
-    // Get exam details for the invite email
     const examRes = await query(
       `SELECT e.*, u.first_name || ' ' || u.last_name as creator_name,
         o.name as org_name
@@ -36,26 +35,28 @@ async function addEmailsToWhitelist(req, res) {
 
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const results = [];
+    let anyEmailAttempted = false;
+    let anyEmailSent = false;
+    let lastEmailError = null;
 
     for (const rawEmail of emails) {
       const email = rawEmail.trim().toLowerCase();
       if (!email || !email.includes('@')) continue;
       try {
-        // Insert into whitelist
         const token = crypto.randomBytes(24).toString('hex');
         await query(`
           INSERT INTO exam_email_whitelist (exam_id, email, added_by)
           VALUES ($1,$2,$3) ON CONFLICT (exam_id,email) DO NOTHING
         `, [examId, email, req.user.id]);
 
-        // Create invitation record
         await query(`
           INSERT INTO exam_invitations (exam_id, email, token)
           VALUES ($1,$2,$3) ON CONFLICT DO NOTHING
         `, [examId, email, token]);
 
-        // Send invite email if requested
+        let emailStatus = { sent: false, simulated: true, error: null };
         if (sendInvite) {
+          anyEmailAttempted = true;
           const registerLink = `${baseUrl}/exam-register/${token}`;
           const { subject, html, text } = examInviteTemplate({
             studentName: email.split('@')[0],
@@ -67,24 +68,48 @@ async function addEmailsToWhitelist(req, res) {
             instructions: exam.instructions,
           });
           try {
-            await sendEmail({ to: email, subject, html, text });
+            emailStatus = await sendEmail({ to: email, subject, html, text });
+            if (emailStatus.sent) anyEmailSent = true;
+            if (emailStatus.error) lastEmailError = emailStatus.error;
           } catch (emailErr) {
             logger.warn(`Email to ${email} failed (not critical):`, emailErr.message);
+            emailStatus = { sent: false, simulated: false, error: emailErr.message };
+            lastEmailError = emailErr.message;
           }
         }
-        results.push({ email, status: 'added' });
+        results.push({ email, status: 'added', emailSent: emailStatus.sent, emailSimulated: emailStatus.simulated, emailError: emailStatus.error });
       } catch (err) {
         results.push({ email, status: 'error', error: err.message });
       }
     }
 
-    // Update exam access type
     await query(
       "UPDATE exams SET access_type='email_whitelist' WHERE id=$1",
       [examId]
     );
 
-    res.json({ added: results.filter(r => r.status === 'added').length, results });
+    let emailSummary = null;
+    if (anyEmailAttempted) {
+      if (!smtpConfigured()) {
+        emailSummary = {
+          status: 'not_configured',
+          message: 'Emails were NOT sent because SMTP is not configured on the server. Set SMTP_HOST, SMTP_USER and SMTP_PASS in your environment variables to enable real email delivery.',
+        };
+      } else if (anyEmailSent) {
+        emailSummary = { status: 'sent', message: 'Invitation emails were sent successfully.' };
+      } else {
+        emailSummary = {
+          status: 'failed',
+          message: `SMTP is configured but sending failed: ${lastEmailError || 'unknown error'}. Check your SMTP credentials.`,
+        };
+      }
+    }
+
+    res.json({
+      added: results.filter(r => r.status === 'added').length,
+      results,
+      emailSummary,
+    });
   } catch (err) {
     logger.error('addEmailsToWhitelist:', err.message);
     res.status(500).json({ error: 'Failed to add emails' });
@@ -103,7 +128,6 @@ async function bulkUploadEmails(req, res) {
   try {
     const { examId } = req.params;
     const { emails, sendInvite } = req.body;
-    // Reuse addEmailsToWhitelist logic
     req.body.emails = Array.isArray(emails) ? emails : emails.split(/[\n,;]+/).map(e => e.trim()).filter(Boolean);
     return addEmailsToWhitelist(req, res);
   } catch { res.status(500).json({ error: 'Bulk upload failed' }); }
@@ -135,12 +159,27 @@ async function resendInvite(req, res) {
       orgName: '',
       instructions: exam.instructions,
     });
-    await sendEmail({ to: email, subject, html, text });
+    const emailStatus = await sendEmail({ to: email, subject, html, text });
     await query("UPDATE exam_invitations SET sent_at=NOW(), status='sent' WHERE exam_id=$1 AND email=$2", [examId, email]);
-    res.json({ message: 'Invite resent' });
+
+    if (!emailStatus.sent) {
+      return res.json({ message: 'Invite recorded but email was not delivered', emailStatus });
+    }
+    res.json({ message: 'Invite resent successfully', emailStatus });
   } catch (err) {
     logger.error('resendInvite:', err.message);
     res.status(500).json({ error: 'Failed to resend invite' });
+  }
+}
+
+// ── Test email configuration ───────────────────────────────
+async function testEmailSetup(req, res) {
+  try {
+    const { testRecipient } = req.body;
+    const result = await testEmailConfig(testRecipient);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
   }
 }
 
@@ -191,7 +230,6 @@ async function registerViaToken(req, res) {
     const invite = inv.rows[0];
     if (invite.exam_status === 'archived') return res.status(410).json({ error: 'This exam is no longer available' });
 
-    // Mark invite as opened
     await query("UPDATE exam_invitations SET opened_at=NOW(), status='opened' WHERE token=$1", [token]);
     res.json({ invite: { examId: invite.exam_id, examTitle: invite.title, startTime: invite.start_time, duration: invite.duration_minutes, instructions: invite.instructions, email: invite.email } });
   } catch { res.status(500).json({ error: 'Failed to validate token' }); }
@@ -204,7 +242,6 @@ async function confirmRegistration(req, res) {
     if (!inv.rows.length) return res.status(404).json({ error: 'Invalid token' });
     const invite = inv.rows[0];
 
-    // Find or create student account by email
     let userRes = await query('SELECT id FROM users WHERE email=$1', [invite.email.toLowerCase()]);
     if (!userRes.rows.length) {
       const bcrypt = require('bcryptjs');
@@ -215,17 +252,14 @@ async function confirmRegistration(req, res) {
          VALUES ($1,$2,$3,$4,'student',true,true) RETURNING id`,
         [invite.email.toLowerCase(), hash, invite.email.split('@')[0], '', ]
       );
-      // TODO: send welcome email with tempPwd
     }
     const userId = userRes.rows[0].id;
 
-    // Enroll in exam
     await query(
       `INSERT INTO exam_enrollments (exam_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
       [invite.exam_id, userId]
     );
 
-    // Mark whitelist as registered
     await query("UPDATE exam_email_whitelist SET registered=true WHERE exam_id=$1 AND email=$2",
       [invite.exam_id, invite.email]);
     await query("UPDATE exam_invitations SET registered_at=NOW(), status='registered' WHERE token=$1", [token]);
@@ -268,7 +302,7 @@ async function checkExamAccess(req, res) {
 
 module.exports = {
   getEmailWhitelist, addEmailsToWhitelist, removeEmailFromWhitelist,
-  bulkUploadEmails, resendInvite,
+  bulkUploadEmails, resendInvite, testEmailSetup,
   getDomainWhitelist, addDomains, removeDomain,
   registerViaToken, confirmRegistration, checkExamAccess,
 };

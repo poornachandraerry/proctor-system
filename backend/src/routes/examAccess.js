@@ -15,6 +15,9 @@ router.get('/check/:examId', ctrl.checkExamAccess);
 // ── Staff only ─────────────────────────────────────────────
 router.use(authorize('admin', 'org_admin', 'examiner'));
 
+// Test SMTP configuration — verify BEFORE relying on real invites
+router.post('/test-email', ctrl.testEmailSetup);
+
 // Email whitelist — ORDER MATTERS: specific routes before parameterised
 router.get('/:examId/emails',                       ctrl.getEmailWhitelist);
 router.post('/:examId/emails/bulk',                 ctrl.bulkUploadEmails);         // before /:email
