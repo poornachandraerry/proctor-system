@@ -77,6 +77,7 @@ app.use('/api/licensing',      require('./routes/licensing'));
 app.use('/api/org-admin',      require('./routes/orgAdmin'));
 app.use('/api/exam-access',    require('./routes/examAccess'));
 app.use('/api/question-media', require('./routes/questionMedia'));
+app.use('/api/public-exam', require('./routes/publicExamLink'));
 
 // ── NEW v5 routes ──────────────────────────────────────────
 app.use('/api/question-banks', require('./routes/questionBanks'));

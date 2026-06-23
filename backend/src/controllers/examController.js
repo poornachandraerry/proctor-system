@@ -1,4 +1,5 @@
 const { query, transaction } = require('../config/database');
+const crypto = require('crypto');
 const logger = require('../utils/logger');
 
 async function getExams(req, res) {
@@ -9,8 +10,6 @@ async function getExams(req, res) {
     const params = [];
 
     if (req.user.role === 'student') {
-      // FIX (Issue #4): same leak as dashboard — restrict to exams the
-      // student is enrolled in, OR open exams created within their own org.
       params.push(req.user.id);
       params.push(req.user.org_id || null);
       conditions.push(`
@@ -75,7 +74,6 @@ async function getExam(req, res) {
 
     const exam = result.rows[0];
 
-    // FIX (Issue #4): block direct access by URL/ID too, not just hide from list
     if (req.user.role === 'student') {
       const enrolled = await query(
         'SELECT 1 FROM exam_enrollments WHERE exam_id=$1 AND user_id=$2', [id, req.user.id]
@@ -107,16 +105,20 @@ async function createExam(req, res) {
       ai_analysis: true, screenshot_interval: 30, max_warnings: 3
     };
 
+    // Every exam gets a permanent public registration link token at creation
+    const publicLinkToken = crypto.randomBytes(20).toString('hex');
+
     const result = await query(`
       INSERT INTO exams (title, description, instructions, created_by, duration_minutes,
         total_marks, pass_percentage, start_time, end_time, settings, proctoring_settings,
-        access_type, show_results_to_student)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open',true) RETURNING *
+        access_type, show_results_to_student, public_link_token)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open',true,$12) RETURNING *
     `, [title, description, instructions, req.user.id,
         durationMinutes || 60, totalMarks || 100, passPercentage || 40,
         startTime || null, endTime || null,
         JSON.stringify(settings || {}),
-        JSON.stringify(proctoringSettings || defaultProctoring)]);
+        JSON.stringify(proctoringSettings || defaultProctoring),
+        publicLinkToken]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     logger.error('createExam error:', error);
@@ -206,4 +208,22 @@ async function getExamStats(req, res) {
   } catch { res.status(500).json({ error: 'Failed to get stats' }); }
 }
 
-module.exports = { getExams, getExam, createExam, updateExam, deleteExam, publishExam, getExamStats };
+// Regenerate the public link token (invalidates the old shareable link)
+async function regeneratePublicLink(req, res) {
+  try {
+    const { id } = req.params;
+    const check = await query('SELECT created_by FROM exams WHERE id = $1', [id]);
+    if (!check.rows.length) return res.status(404).json({ error: 'Exam not found' });
+    if (req.user.role !== 'admin' && check.rows[0].created_by !== req.user.id)
+      return res.status(403).json({ error: 'Forbidden' });
+
+    const newToken = crypto.randomBytes(20).toString('hex');
+    await query('UPDATE exams SET public_link_token=$1 WHERE id=$2', [newToken, id]);
+    res.json({ publicLinkToken: newToken });
+  } catch { res.status(500).json({ error: 'Failed to regenerate link' }); }
+}
+
+module.exports = {
+  getExams, getExam, createExam, updateExam, deleteExam,
+  publishExam, getExamStats, regeneratePublicLink,
+};
