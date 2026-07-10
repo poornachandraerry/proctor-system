@@ -61,6 +61,24 @@ export default function ExamDetailPage() {
   };
 
   const handleStart = async () => {
+    // Request fullscreen FIRST and synchronously within this click handler —
+    // browsers only allow requestFullscreen() inside a direct user-gesture
+    // callback, not after any awaited network calls. Since we navigate with
+    // client-side routing (no full page reload), fullscreen carries over to
+    // the exam-taking page seamlessly.
+    if (exam?.proctoring_settings?.fullscreen_required) {
+      try {
+        const el = document.documentElement;
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+        else if (el.msRequestFullscreen) await el.msRequestFullscreen();
+      } catch (e) {
+        // Fullscreen might be blocked (e.g. iframe, browser setting) —
+        // ExamTakePage shows a fallback "Enter Fullscreen" prompt in that case.
+        console.warn('Fullscreen request failed:', e.message);
+      }
+    }
+
     setStarting(true);
     try {
       // Check access first

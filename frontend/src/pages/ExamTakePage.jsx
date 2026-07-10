@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, ChevronLeft, ChevronRight, CheckCircle,
-  Shield, AlertTriangle, Wifi, WifiOff, Mic, MicOff
+  Shield, AlertTriangle, Wifi, WifiOff, Mic, MicOff, Maximize
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
@@ -158,11 +158,15 @@ export default function ExamTakePage() {
   const [warnings, setWarnings]   = useState(0);
   const [online, setOnline]       = useState(navigator.onLine);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  const [needsFullscreen, setNeedsFullscreen] = useState(false);
+  const [cameraBlocked, setCameraBlocked] = useState(false);
 
-  const timerRef  = useRef(null);
-  const webcamRef = useRef(null);
-  const camStream = useRef(null);
-  const aiTimer   = useRef(null);
+  const timerRef   = useRef(null);
+  const webcamRef  = useRef(null);
+  const camStream  = useRef(null);
+  const aiTimer    = useRef(null);
+  const camCheckTimer = useRef(null);
+  const examRootRef = useRef(null);
 
   const behaviour = useBehaviourTracker(sessionId);
   const audio     = useAudioCapture(sessionId, audioEnabled);
@@ -190,23 +194,173 @@ export default function ExamTakePage() {
     if (questions[currentQ]) behaviour.onQuestionView(questions[currentQ].id);
   }, [currentQ, questions]);
 
+  // ── FULLSCREEN ENFORCEMENT (Issue #1 fix) ───────────────
+  const requestFullscreen = useCallback(async () => {
+    const el = examRootRef.current || document.documentElement;
+    try {
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      else if (el.msRequestFullscreen) await el.msRequestFullscreen();
+      setNeedsFullscreen(false);
+    } catch (e) {
+      console.warn('Fullscreen request failed:', e.message);
+    }
+  }, []);
+
+  const isFullscreenActive = () =>
+    !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+
+  // Require fullscreen at exam start if setting is enabled
+  useEffect(() => {
+    if (loading || !session || submitted) return;
+    if (session.proctoring_settings?.fullscreen_required && !isFullscreenActive()) {
+      setNeedsFullscreen(true);
+    }
+  }, [loading, session, submitted]);
+
+  // Detect fullscreen exit during exam and log a violation
+  useEffect(() => {
+    if (!session?.proctoring_settings?.fullscreen_required || submitted) return;
+
+    const onFsChange = async () => {
+      if (!isFullscreenActive() && !submitted) {
+        setNeedsFullscreen(true);
+        const nw = warnings + 1;
+        setWarnings(nw);
+        toast.error(`Warning ${nw}: You exited fullscreen mode!`);
+        try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'fullscreen_exit' }); } catch {}
+        const max = session.proctoring_settings?.max_warnings || 3;
+        if (nw >= max) {
+          setTerminated(true);
+          try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Exceeded fullscreen exit limit' }); } catch {}
+        }
+      } else {
+        setNeedsFullscreen(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    document.addEventListener('MSFullscreenChange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+      document.removeEventListener('MSFullscreenChange', onFsChange);
+    };
+  }, [session, sessionId, submitted, warnings]);
+
   // Webcam + audio start
   useEffect(() => {
     if (loading || !session) return;
+    let track = null;
+    const onTrackMute   = async () => {
+      // Fires when a physical camera shutter is closed or the OS/browser
+      // suspends the feed — the pixel-based check below can miss this
+      // because no new (blank) frames may even be delivered.
+      setCameraBlocked(true);
+      setWarnings(w => {
+        const nw = w + 1;
+        toast.error(`Warning ${nw}: Camera feed was interrupted (shutter closed or camera disabled)!`);
+        return nw;
+      });
+      try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'camera_blocked', data: { reason: 'track_muted' } }); } catch {}
+    };
+    const onTrackEnded  = async () => {
+      toast.error('Camera connection lost — please reconnect your webcam.');
+      try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'camera_blocked', data: { reason: 'track_ended' } }); } catch {}
+    };
+    const onTrackUnmute = () => setCameraBlocked(false);
+
     const startMedia = async () => {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         camStream.current = s;
         if (webcamRef.current) webcamRef.current.srcObject = s;
+        track = s.getVideoTracks()[0];
+        if (track) {
+          track.addEventListener('mute', onTrackMute);
+          track.addEventListener('unmute', onTrackUnmute);
+          track.addEventListener('ended', onTrackEnded);
+        }
       } catch { toast.error('Webcam required for this exam'); }
       audio.start();
     };
     startMedia();
     return () => {
+      if (track) {
+        track.removeEventListener('mute', onTrackMute);
+        track.removeEventListener('unmute', onTrackUnmute);
+        track.removeEventListener('ended', onTrackEnded);
+      }
       if (camStream.current) camStream.current.getTracks().forEach(t => t.stop());
       audio.stop();
     };
   }, [loading, session]);
+
+  // ── CAMERA OCCLUSION / DARKNESS DETECTION (Issue #2 fix) ─
+  useEffect(() => {
+    if (!session?.proctoring_settings?.webcam_required || submitted) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 80; canvas.height = 60;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    let consecutiveBlocked = 0;
+
+    const checkFrame = async () => {
+      const video = webcamRef.current;
+      if (!video || video.readyState < 2 || video.videoWidth === 0) return;
+
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        let sum = 0, sumSq = 0;
+        const n = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+          sum += lum;
+          sumSq += lum * lum;
+        }
+        const mean = sum / n;
+        const variance = (sumSq / n) - (mean * mean);
+
+        const isDark        = mean < 18;
+        const isFlatUniform = variance < 6 && mean < 60;
+        const blocked = isDark || isFlatUniform;
+
+        if (blocked) {
+          consecutiveBlocked++;
+        } else {
+          consecutiveBlocked = 0;
+          if (cameraBlocked) setCameraBlocked(false);
+        }
+
+        if (consecutiveBlocked >= 2 && !cameraBlocked) {
+          setCameraBlocked(true);
+          const nw = warnings + 1;
+          setWarnings(nw);
+          toast.error(`Warning ${nw}: Camera appears blocked or covered!`);
+          try {
+            await api.post(`/sessions/${sessionId}/events`, {
+              eventType: 'camera_blocked',
+              data: { mean: Math.round(mean), variance: Math.round(variance) },
+            });
+          } catch {}
+          const max = session.proctoring_settings?.max_warnings || 3;
+          if (nw >= max) {
+            setTerminated(true);
+            try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Camera blocked repeatedly' }); } catch {}
+          }
+        }
+      } catch (e) {
+        // ignore — frame not ready yet
+      }
+    };
+
+    camCheckTimer.current = setInterval(checkFrame, 3000);
+    return () => clearInterval(camCheckTimer.current);
+  }, [session, sessionId, submitted, warnings, cameraBlocked]);
 
   // AI frame analysis every 30s
   useEffect(() => {
@@ -297,6 +451,9 @@ export default function ExamTakePage() {
     setSubmitting(true);
     clearInterval(timerRef.current);
     audio.stop();
+    if (isFullscreenActive() && document.exitFullscreen) {
+      try { await document.exitFullscreen(); } catch {}
+    }
     try {
       const formatted = Object.entries(answers).map(([questionId, answer]) => ({ questionId, answer, timeSpent: 0 }));
       await api.post(`/sessions/${sessionId}/submit`, { answers: formatted });
@@ -349,9 +506,33 @@ export default function ExamTakePage() {
   const urgent  = timeLeft <= 300 && timeLeft > 0;
   const answered = Object.keys(answers).length;
 
-  // ── Main exam UI ───────────────────────────────────────
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col" style={{ userSelect:'none' }}>
+    <div ref={examRootRef} className="min-h-screen bg-surface-950 flex flex-col relative" style={{ userSelect:'none' }}>
+
+      {/* ── Fullscreen required overlay (Issue #1) ────────── */}
+      {needsFullscreen && !terminated && !submitted && (
+        <div className="fixed inset-0 z-[100] bg-surface-950/98 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass rounded-2xl p-10 max-w-md text-center border border-amber-500/30 bg-amber-500/5">
+            <Maximize size={48} className="text-amber-400 mx-auto mb-4"/>
+            <h2 className="font-display text-2xl font-bold text-white mb-3">Fullscreen Required</h2>
+            <p className="text-surface-400 mb-6">
+              This exam must be taken in fullscreen mode. Click below to continue. Exiting fullscreen during the exam counts as a warning.
+            </p>
+            <button onClick={requestFullscreen} className="btn-primary mx-auto">
+              <Maximize size={16}/>Enter Fullscreen &amp; Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Camera blocked banner (Issue #2) ──────────────── */}
+      {cameraBlocked && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-5 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 text-sm font-semibold animate-pulse">
+          <AlertTriangle size={16}/>
+          Camera appears blocked — please uncover your webcam
+        </div>
+      )}
+
       {/* Top bar */}
       <div className="bg-surface-900 border-b border-surface-800 px-4 py-2.5 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">
@@ -492,12 +673,19 @@ export default function ExamTakePage() {
         <div className="w-56 bg-surface-900 border-l border-surface-800 flex flex-col shrink-0">
           {/* Webcam */}
           <div className="p-3 border-b border-surface-800">
-            <div className="relative rounded-xl overflow-hidden bg-surface-800 aspect-video">
+            <div className={`relative rounded-xl overflow-hidden bg-surface-800 aspect-video ${cameraBlocked ? 'ring-2 ring-red-500' : ''}`}>
               <video ref={webcamRef} autoPlay muted playsInline className="w-full h-full object-cover"/>
-              <div className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
+              <div className={`absolute top-1.5 left-1.5 w-2 h-2 rounded-full ${cameraBlocked ? 'bg-red-500' : 'bg-red-500 animate-pulse'}`}/>
               <div className="absolute bottom-1.5 right-1.5 text-xs text-white bg-black/60 px-1 rounded font-mono">LIVE</div>
+              {cameraBlocked && (
+                <div className="absolute inset-0 bg-red-900/40 flex items-center justify-center">
+                  <AlertTriangle size={20} className="text-red-300"/>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-surface-500 text-center mt-1.5">AI Monitoring Active</p>
+            <p className={`text-xs text-center mt-1.5 ${cameraBlocked ? 'text-red-400 font-semibold' : 'text-surface-500'}`}>
+              {cameraBlocked ? 'Camera blocked!' : 'AI Monitoring Active'}
+            </p>
           </div>
 
           {/* Question navigator */}

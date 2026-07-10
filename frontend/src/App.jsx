@@ -21,6 +21,7 @@ import LicensingPage      from './pages/LicensingPage';
 import OrgAdminPage       from './pages/OrgAdminPage';
 import QuestionBankPage   from './pages/QuestionBankPage';
 import PracticeTestPage   from './pages/PracticeTestPage';
+import PublicExamRegisterPage from './pages/PublicExamRegisterPage';
 import Layout             from './components/shared/Layout';
 
 function PrivateRoute({ children, roles }) {
@@ -62,10 +63,11 @@ export default function App() {
         {/* Public */}
         <Route path="/login"    element={<PublicRoute><LoginPage/></PublicRoute>}/>
         <Route path="/register" element={<PublicRoute><RegisterPage/></PublicRoute>}/>
-
+        
         {/* Exam invite registration (public, no login needed) */}
         <Route path="/exam-register/:token" element={<ExamRegisterPage/>}/>
-
+        <Route path="/exam-register/:token" element={<PublicExamRegisterPage/>}/>
+        
         {/* Full-screen exam (no sidebar layout) */}
         <Route path="/exam/:sessionId/take"
           element={<PrivateRoute roles={['student']}><ExamTakePage/></PrivateRoute>}/>

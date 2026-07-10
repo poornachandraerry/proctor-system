@@ -1,12 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Database, Plus, Search, Trash2, BookOpen, Zap,
   CheckCircle, XCircle, RefreshCw, Globe, Lock,
-  Sparkles, Loader, ChevronDown, ChevronUp
+  Sparkles, Loader, ChevronDown, ChevronUp,
+  Upload, Download, FileSpreadsheet, AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import api from '../utils/api';
 import useAuthStore from '../store/authStore';
 
@@ -47,6 +49,7 @@ export default function QuestionBankPage() {
   const { user }  = useAuthStore();
   const navigate  = useNavigate();
   const isStaff   = ['admin','org_admin','examiner'].includes(user?.role);
+  const fileRef   = useRef(null);
 
   const [banks, setBanks]               = useState([]);
   const [selectedBank, setSelectedBank] = useState(null);
@@ -62,6 +65,12 @@ export default function QuestionBankPage() {
   const [showGenPractice, setShowGenPractice] = useState(false);
   const [savingQ, setSavingQ]           = useState(false);
   const [aiGenerating, setAiGen]        = useState(false);
+
+  // Bulk upload state
+  const [showUpload, setShowUpload]     = useState(false);
+  const [uploadPreview, setUploadPreview] = useState([]);
+  const [uploadErrors, setUploadErrors]   = useState([]);
+  const [importing, setImporting]         = useState(false);
 
   const [bankForm, setBankForm] = useState({ name:'', description:'', subject:'', module:'', isPublic: false });
   const [qForm, setQForm]       = useState({ ...EMPTY_Q });
@@ -164,12 +173,112 @@ export default function QuestionBankPage() {
     finally { setAiGen(false); }
   };
 
+  // ── Excel Bulk Upload — Download Template ─────────────
+  const downloadTemplate = async () => {
+    try {
+      const response = await api.get('/question-banks/questions/template', { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([response.data]));
+      const a = document.createElement('a');
+      a.href = url; a.download = 'ProctorAI_QuestionBank_Upload_Template.xlsx'; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Template downloaded!');
+    } catch { toast.error('Failed to download template'); }
+  };
+
+  // ── Excel Bulk Upload — Parse Uploaded File ────────────
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'array' });
+        const sheet = wb.Sheets['Questions'] || wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+        let headerRowIdx = rows.findIndex(r => r.some(c => String(c).toLowerCase().includes('question_text')));
+        if (headerRowIdx === -1) { toast.error('Cannot find header row. Make sure you use the official template.'); return; }
+
+        const headers = rows[headerRowIdx].map(h => String(h||'').toLowerCase().trim());
+        const dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== undefined && c !== ''));
+
+        const errors = [];
+        const parsed = [];
+
+        dataRows.forEach((row, i) => {
+          const get = (key) => {
+            const idx = headers.indexOf(key);
+            return idx >= 0 ? String(row[idx] || '').trim() : '';
+          };
+          const rowNum = headerRowIdx + i + 2;
+
+          const qText = get('question_text');
+          const qType = get('question_type') || 'mcq';
+          if (!qText) { errors.push(`Row ${rowNum}: question_text is empty — skipped`); return; }
+          const validTypes = ['mcq','true_false','short_answer','essay'];
+          if (!validTypes.includes(qType)) { errors.push(`Row ${rowNum}: invalid question_type "${qType}"`); return; }
+
+          const marks    = parseFloat(get('marks')) || 1;
+          const negMarks = parseFloat(get('negative_marks')) || 0;
+          const optA = get('option_a'); const optB = get('option_b');
+          const optC = get('option_c'); const optD = get('option_d');
+          const correct = get('correct_answer').toLowerCase();
+
+          const q = {
+            questionText: qText,
+            questionType: qType,
+            marks, negativeMarks: negMarks,
+            difficulty: ['easy','medium','hard'].includes(get('difficulty')) ? get('difficulty') : 'medium',
+            topic: get('topic'),
+            explanation: get('explanation'),
+            options: null,
+            correctAnswer: null,
+          };
+
+          if (qType === 'mcq' || qType === 'true_false') {
+            if (!optA || !optB) { errors.push(`Row ${rowNum}: option_a and option_b required for ${qType}`); return; }
+            q.options = [{ id:'a', text:optA }, { id:'b', text:optB }];
+            if (optC) q.options.push({ id:'c', text:optC });
+            if (optD) q.options.push({ id:'d', text:optD });
+            q.correctAnswer = correct || 'a';
+          }
+          parsed.push(q);
+        });
+
+        setUploadPreview(parsed);
+        setUploadErrors(errors);
+        toast.success(`${parsed.length} questions ready to import${errors.length ? `, ${errors.length} errors` : ''}`);
+      } catch (err) {
+        toast.error('Failed to parse file. Please use the official template.');
+        console.error(err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  // ── Excel Bulk Upload — Import Into Selected Bank ──────
+  const importUploadedQuestions = async () => {
+    if (!uploadPreview.length || !selectedBank) return;
+    setImporting(true);
+    try {
+      const { data } = await api.post(`/question-banks/${selectedBank.id}/questions/bulk`, { questions: uploadPreview });
+      toast.success(`${data.added} questions imported into "${selectedBank.name}"!`);
+      setUploadPreview([]);
+      setUploadErrors([]);
+      setShowUpload(false);
+      loadQuestions(selectedBank.id);
+      loadBanks();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to import questions');
+    } finally { setImporting(false); }
+  };
+
   const handleGenerateExam = async (e) => {
     e.preventDefault();
     try {
       const { data } = await api.post('/question-banks/generate-exam', {
-        ...genExamForm,
-        bankId: selectedBank.id,
+        ...genExamForm, bankId: selectedBank.id,
         numQuestions: parseInt(genExamForm.numQuestions),
         durationMinutes: parseInt(genExamForm.durationMinutes),
       });
@@ -182,8 +291,7 @@ export default function QuestionBankPage() {
     e.preventDefault();
     try {
       const { data } = await api.post('/question-banks/practice/generate', {
-        ...genPractForm,
-        bankId: selectedBank.id,
+        ...genPractForm, bankId: selectedBank.id,
         numQuestions: parseInt(genPractForm.numQuestions),
         durationMinutes: parseInt(genPractForm.durationMinutes),
       });
@@ -334,6 +442,66 @@ export default function QuestionBankPage() {
                   </div>
                 )}
               </div>
+
+              {/* ── Excel Bulk Upload Panel ──────────────── */}
+              {isStaff && (
+                <div className="card border-emerald-500/20 bg-emerald-500/5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet size={18} className="text-emerald-400"/>
+                      <h3 className="section-title">Bulk Upload via Excel</h3>
+                    </div>
+                    <button onClick={() => setShowUpload(!showUpload)} className="text-surface-400 hover:text-white transition-colors">
+                      {showUpload ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
+                    </button>
+                  </div>
+                  {showUpload && (
+                    <div className="mt-4 space-y-3">
+                      <p className="text-xs text-surface-400">Upload an Excel file (.xlsx) with your questions for this bank. Download our template to see the correct format with dropdown validations already built in.</p>
+                      <div className="flex gap-3 flex-wrap">
+                        <button onClick={downloadTemplate} className="btn-secondary text-sm py-2">
+                          <Download size={14}/>Download Template (.xlsx)
+                        </button>
+                        <button onClick={() => fileRef.current?.click()} className="btn-primary text-sm py-2">
+                          <Upload size={14}/>Choose Excel File
+                        </button>
+                        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+                      </div>
+
+                      {uploadErrors.length > 0 && (
+                        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 space-y-1">
+                          <p className="text-xs font-semibold text-red-400 mb-1">{uploadErrors.length} errors found:</p>
+                          {uploadErrors.map((e,i) => <p key={i} className="text-xs text-red-300">{e}</p>)}
+                        </div>
+                      )}
+
+                      {uploadPreview.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold text-white">{uploadPreview.length} questions ready to import into "{selectedBank.name}":</p>
+                            <button onClick={importUploadedQuestions} disabled={importing} className="btn-success text-sm py-2">
+                              {importing ? <Loader size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
+                              Import All
+                            </button>
+                          </div>
+                          <div className="max-h-48 overflow-y-auto space-y-1">
+                            {uploadPreview.map((q,i) => (
+                              <div key={i} className="flex items-center gap-3 p-2.5 bg-surface-800 rounded-xl text-xs">
+                                <span className="text-primary-400 font-mono w-6 shrink-0">{i+1}</span>
+                                <span className="text-surface-200 flex-1 line-clamp-1">{q.questionText}</span>
+                                <span className="text-surface-500 shrink-0 capitalize">{q.questionType?.replace('_',' ')}</span>
+                                <span className={`shrink-0 px-1.5 py-0.5 rounded border ${DIFF_STYLE[q.difficulty]}`}>{q.difficulty}</span>
+                                <span className="text-amber-400 shrink-0">{q.marks} mark{q.marks!==1?'s':''}</span>
+                                {q.negativeMarks > 0 && <span className="text-red-400 shrink-0">-{q.negativeMarks}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Filters */}
               <div className="flex gap-3">

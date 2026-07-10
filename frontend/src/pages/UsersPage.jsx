@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Search, Shield, Mail, Building, ToggleLeft, ToggleRight, RefreshCw } from 'lucide-react';
+import { Users, Search, Shield, Mail, Building, ToggleLeft, ToggleRight, RefreshCw, UserPlus, KeyRound, Copy, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 
 const ROLE_STYLES = {
   admin: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
+  org_admin: 'bg-amber-500/20 text-amber-400 border border-amber-500/30',
   examiner: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
   student: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
 };
+
+const EMPTY_FORM = { email: '', firstName: '', lastName: '', role: 'student', organization: '', phone: '' };
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -16,6 +19,15 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+
+  // ── Create user modal ──────────────────────────────────
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState(EMPTY_FORM);
+  const [creating, setCreating] = useState(false);
+
+  // ── Credentials result modal (shown after create / reset) ─
+  const [credsResult, setCredsResult] = useState(null); // { name, email, tempPassword, mode }
+  const [resettingId, setResettingId] = useState(null);
 
   useEffect(() => { fetchUsers(); }, [roleFilter]);
 
@@ -39,6 +51,46 @@ export default function UsersPage() {
     } catch { toast.error('Failed to update user'); }
   };
 
+  const createUser = async (e) => {
+    e.preventDefault();
+    if (!createForm.email || !createForm.firstName || !createForm.lastName) {
+      return toast.error('Email, first name and last name are required');
+    }
+    setCreating(true);
+    try {
+      const { data } = await api.post('/users', createForm);
+      toast.success('User created!');
+      setShowCreate(false);
+      setCreateForm(EMPTY_FORM);
+      fetchUsers();
+      setCredsResult({
+        name: `${data.user.first_name} ${data.user.last_name}`,
+        email: data.user.email,
+        tempPassword: data.tempPassword,
+        mode: 'created',
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to create user');
+    } finally { setCreating(false); }
+  };
+
+  const resetPassword = async (user) => {
+    if (!confirm(`Reset password for ${user.first_name} ${user.last_name}? A new temporary password will be generated.`)) return;
+    setResettingId(user.id);
+    try {
+      const { data } = await api.post(`/users/${user.id}/reset-password`);
+      toast.success('Password reset!');
+      setCredsResult({
+        name: `${user.first_name} ${user.last_name}`,
+        email: user.email,
+        tempPassword: data.tempPassword,
+        mode: 'reset',
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reset password');
+    } finally { setResettingId(null); }
+  };
+
   const filtered = users.filter(u =>
     `${u.first_name} ${u.last_name} ${u.email}`.toLowerCase().includes(search.toLowerCase())
   );
@@ -50,7 +102,12 @@ export default function UsersPage() {
           <h1 className="font-display text-3xl font-bold text-white">User Management</h1>
           <p className="text-surface-400 mt-1">{total} total users</p>
         </div>
-        <button onClick={fetchUsers} className="btn-secondary"><RefreshCw size={16} />Refresh</button>
+        <div className="flex gap-3">
+          <button onClick={fetchUsers} className="btn-secondary"><RefreshCw size={16} />Refresh</button>
+          <button onClick={() => { setCreateForm(EMPTY_FORM); setShowCreate(true); }} className="btn-primary">
+            <UserPlus size={16} />Add User
+          </button>
+        </div>
       </div>
 
       {/* Stats row */}
@@ -78,6 +135,7 @@ export default function UsersPage() {
         <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="input w-40 py-2.5">
           <option value="">All Roles</option>
           <option value="admin">Admin</option>
+          <option value="org_admin">Org Admin</option>
           <option value="examiner">Examiner</option>
           <option value="student">Student</option>
         </select>
@@ -135,11 +193,18 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-4">
-                    <button onClick={() => toggleActive(user.id, user.is_active)}
-                      className={`p-1.5 rounded-lg transition-colors ${user.is_active ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-surface-500 hover:bg-surface-700'}`}
-                      title={user.is_active ? 'Deactivate' : 'Activate'}>
-                      {user.is_active ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => toggleActive(user.id, user.is_active)}
+                        className={`p-1.5 rounded-lg transition-colors ${user.is_active ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-surface-500 hover:bg-surface-700'}`}
+                        title={user.is_active ? 'Deactivate' : 'Activate'}>
+                        {user.is_active ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                      </button>
+                      <button onClick={() => resetPassword(user)} disabled={resettingId === user.id}
+                        className="p-1.5 rounded-lg text-surface-400 hover:text-primary-400 hover:bg-primary-500/10 transition-colors disabled:opacity-50"
+                        title="Reset password">
+                        <KeyRound size={16} />
+                      </button>
+                    </div>
                   </td>
                 </motion.tr>
               ))}
@@ -151,6 +216,105 @@ export default function UsersPage() {
               <p className="text-surface-400">No users found</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Create User Modal ─────────────────────────────── */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowCreate(false)}>
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            className="glass rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-xl font-bold text-white">Add New User</h2>
+              <button onClick={() => setShowCreate(false)} className="text-surface-400 hover:text-white"><X size={20} /></button>
+            </div>
+            <form onSubmit={createUser} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-surface-400 mb-1 block">First Name</label>
+                  <input required value={createForm.firstName}
+                    onChange={e => setCreateForm({ ...createForm, firstName: e.target.value })}
+                    className="input w-full py-2.5" placeholder="Jane" />
+                </div>
+                <div>
+                  <label className="text-xs text-surface-400 mb-1 block">Last Name</label>
+                  <input required value={createForm.lastName}
+                    onChange={e => setCreateForm({ ...createForm, lastName: e.target.value })}
+                    className="input w-full py-2.5" placeholder="Doe" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-surface-400 mb-1 block">Email</label>
+                <input required type="email" value={createForm.email}
+                  onChange={e => setCreateForm({ ...createForm, email: e.target.value })}
+                  className="input w-full py-2.5" placeholder="jane.doe@example.com" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-surface-400 mb-1 block">Role</label>
+                  <select value={createForm.role} onChange={e => setCreateForm({ ...createForm, role: e.target.value })}
+                    className="input w-full py-2.5">
+                    <option value="student">Student</option>
+                    <option value="examiner">Examiner</option>
+                    <option value="org_admin">Org Admin</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-surface-400 mb-1 block">Phone (optional)</label>
+                  <input value={createForm.phone}
+                    onChange={e => setCreateForm({ ...createForm, phone: e.target.value })}
+                    className="input w-full py-2.5" placeholder="+91..." />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-surface-400 mb-1 block">Organization (optional)</label>
+                <input value={createForm.organization}
+                  onChange={e => setCreateForm({ ...createForm, organization: e.target.value })}
+                  className="input w-full py-2.5" placeholder="PIBM" />
+              </div>
+              <p className="text-xs text-surface-500">A temporary password will be generated automatically and shown to you after the user is created — share it with them securely.</p>
+              <button type="submit" disabled={creating} className="btn-primary w-full justify-center py-2.5">
+                {creating ? 'Creating...' : 'Create User'}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── Credentials Result Modal (create / reset) ─────── */}
+      {credsResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setCredsResult(null)}>
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            className="glass rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-xl font-bold text-white">
+                {credsResult.mode === 'created' ? 'User Created' : 'Password Reset'}
+              </h2>
+              <button onClick={() => setCredsResult(null)} className="text-surface-400 hover:text-white"><X size={20} /></button>
+            </div>
+            <div className="bg-primary-500/10 border border-primary-500/30 rounded-xl p-4">
+              <p className="text-sm text-surface-300 mb-3">Share these credentials securely with <strong className="text-white">{credsResult.name}</strong>:</p>
+              <div className="mb-3">
+                <div className="text-xs text-surface-500 mb-0.5">Email</div>
+                <code className="block text-sm text-white font-mono">{credsResult.email}</code>
+              </div>
+              <div>
+                <div className="text-xs text-surface-500 mb-0.5">Temporary Password</div>
+                <div className="flex items-center gap-2">
+                  <code className="block text-lg text-primary-300 font-mono font-bold tracking-wider">{credsResult.tempPassword}</code>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(credsResult.tempPassword); toast.success('Copied!'); }}
+                    className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-surface-700" title="Copy password">
+                    <Copy size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-surface-500 mt-4">
+              This password won't be shown again — if it's lost, use the reset password action to generate a new one.
+            </p>
+          </motion.div>
         </div>
       )}
     </div>
