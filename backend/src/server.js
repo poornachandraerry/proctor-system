@@ -24,6 +24,12 @@ const logger           = require('./utils/logger');
 const app    = express();
 const server = http.createServer(app);
 
+// Render (and most hosting platforms) sit behind a reverse proxy that sets
+// X-Forwarded-For. Without this, express-rate-limit throws a validation
+// error on every request that hits a rate limiter, breaking login and
+// other protected routes with a generic 500 error.
+app.set('trust proxy', 1);
+
 const io = new Server(server, {
   cors: {
     origin:      process.env.FRONTEND_URL || 'http://localhost:5173',
