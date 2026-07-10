@@ -64,9 +64,11 @@ export default function App() {
         <Route path="/login"    element={<PublicRoute><LoginPage/></PublicRoute>}/>
         <Route path="/register" element={<PublicRoute><RegisterPage/></PublicRoute>}/>
         
-        {/* Exam invite registration (public, no login needed) */}
+        {/* Exam invite registration (public, no login needed) — via emailed invite token */}
         <Route path="/exam-register/:token" element={<ExamRegisterPage/>}/>
-        <Route path="/exam-register/:token" element={<PublicExamRegisterPage/>}/>
+
+        {/* Public open self-registration link (public, no login needed) — via shareable public_link_token */}
+        <Route path="/public-exam/:token" element={<PublicExamRegisterPage/>}/>
         
         {/* Full-screen exam (no sidebar layout) */}
         <Route path="/exam/:sessionId/take"

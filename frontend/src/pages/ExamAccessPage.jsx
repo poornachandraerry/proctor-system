@@ -55,7 +55,7 @@ export default function ExamAccessPage({ examId: propExamId }) {
 
   // ── Shareable public registration link ─────────────────
   const publicLinkUrl = exam?.public_link_token
-    ? `${window.location.origin}/exam-register/${exam.public_link_token}`
+    ? `${window.location.origin}/public-exam/${exam.public_link_token}`
     : null;
 
   const handleCopyLink = () => {
