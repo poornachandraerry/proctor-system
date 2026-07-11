@@ -24,10 +24,9 @@ async function addEmailsToWhitelist(req, res) {
 
     const examRes = await query(
       `SELECT e.*, u.first_name || ' ' || u.last_name as creator_name,
-        o.name as org_name
+        u.organization as org_name
        FROM exams e
        LEFT JOIN users u ON e.created_by = u.id
-       LEFT JOIN organizations o ON u.org_id = o.id
        WHERE e.id = $1`, [examId]
     );
     if (!examRes.rows.length) return res.status(404).json({ error: 'Exam not found' });
