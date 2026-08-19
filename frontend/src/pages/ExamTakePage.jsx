@@ -160,6 +160,8 @@ export default function ExamTakePage() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [needsFullscreen, setNeedsFullscreen] = useState(false);
   const [cameraBlocked, setCameraBlocked] = useState(false);
+  const [webcamPermissionDenied, setWebcamPermissionDenied] = useState(false);
+  const [webcamRetrying, setWebcamRetrying] = useState(false);
 
   const timerRef   = useRef(null);
   const webcamRef  = useRef(null);
@@ -167,6 +169,7 @@ export default function ExamTakePage() {
   const aiTimer    = useRef(null);
   const camCheckTimer = useRef(null);
   const examRootRef = useRef(null);
+  const isSubmitExitRef = useRef(false); // true while exitFullscreen() is called as part of a legitimate submit
 
   const behaviour = useBehaviourTracker(sessionId);
   const audio     = useAudioCapture(sessionId, audioEnabled);
@@ -210,6 +213,12 @@ export default function ExamTakePage() {
   const isFullscreenActive = () =>
     !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
 
+  const retryWebcamAccess = useCallback(async () => {
+    setWebcamRetrying(true);
+    try { if (retryWebcamRef.current) await retryWebcamRef.current(); }
+    finally { setWebcamRetrying(false); }
+  }, []);
+
   // Require fullscreen at exam start if setting is enabled
   useEffect(() => {
     if (loading || !session || submitted) return;
@@ -222,18 +231,23 @@ export default function ExamTakePage() {
   useEffect(() => {
     if (!session?.proctoring_settings?.fullscreen_required || submitted) return;
 
-    const onFsChange = async () => {
+    const onFsChange = () => {
+      if (isSubmitExitRef.current) return; // legitimate exit as part of submitting — not a violation
       if (!isFullscreenActive() && !submitted) {
         setNeedsFullscreen(true);
-        const nw = warnings + 1;
-        setWarnings(nw);
-        toast.error(`Warning ${nw}: You exited fullscreen mode!`);
-        try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'fullscreen_exit' }); } catch {}
-        const max = session.proctoring_settings?.max_warnings || 3;
-        if (nw >= max) {
-          setTerminated(true);
-          try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Exceeded fullscreen exit limit' }); } catch {}
-        }
+        setWarnings(w => {
+          const nw = w + 1;
+          toast.error(`Warning ${nw}: You exited fullscreen mode!`);
+          (async () => {
+            try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'fullscreen_exit' }); } catch {}
+            const max = session.proctoring_settings?.max_warnings || 3;
+            if (nw >= max) {
+              setTerminated(true);
+              try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Exceeded fullscreen exit limit' }); } catch {}
+            }
+          })();
+          return nw;
+        });
       } else {
         setNeedsFullscreen(false);
       }
@@ -247,9 +261,10 @@ export default function ExamTakePage() {
       document.removeEventListener('webkitfullscreenchange', onFsChange);
       document.removeEventListener('MSFullscreenChange', onFsChange);
     };
-  }, [session, sessionId, submitted, warnings]);
+  }, [session, sessionId, submitted]);
 
   // Webcam + audio start
+  const retryWebcamRef = useRef(null);
   useEffect(() => {
     if (loading || !session) return;
     let track = null;
@@ -282,10 +297,19 @@ export default function ExamTakePage() {
           track.addEventListener('unmute', onTrackUnmute);
           track.addEventListener('ended', onTrackEnded);
         }
-      } catch { toast.error('Webcam required for this exam'); }
+        setWebcamPermissionDenied(false);
+      } catch {
+        toast.error('Webcam access is required for this exam');
+        // Only hard-block the exam if the exam is actually configured to require a webcam.
+        if (session?.proctoring_settings?.webcam_required) {
+          setWebcamPermissionDenied(true);
+          try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'camera_blocked', data: { reason: 'permission_denied' } }); } catch {}
+        }
+      }
       audio.start();
     };
     startMedia();
+    retryWebcamRef.current = startMedia;
     return () => {
       if (track) {
         track.removeEventListener('mute', onTrackMute);
@@ -306,6 +330,8 @@ export default function ExamTakePage() {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     let consecutiveBlocked = 0;
+    let baseline = null;     // rolling "normal" brightness, adapts to room lighting
+    let isCurrentlyBlocked = false;
 
     const checkFrame = async () => {
       const video = webcamRef.current;
@@ -325,42 +351,66 @@ export default function ExamTakePage() {
         const mean = sum / n;
         const variance = (sumSq / n) - (mean * mean);
 
-        const isDark        = mean < 18;
-        const isFlatUniform = variance < 6 && mean < 60;
-        const blocked = isDark || isFlatUniform;
+        // Absolute checks: pitch black (shutter/lens cap), or a flat uniform
+        // frame (covered lens, even under auto-exposure gain boost).
+        const isDark        = mean < 20;
+        const isFlatUniform = variance < 10 && mean < 80;
+
+        // Relative check: a sudden large brightness drop from the room's
+        // established baseline. This catches a finger over the lens even
+        // in bright rooms, where auto-exposure can push mean well above 60 —
+        // fixed absolute thresholds alone miss that case.
+        let isRelativeDrop = false;
+        if (baseline !== null && baseline > 25) {
+          isRelativeDrop = mean < baseline * 0.45 && variance < 25;
+        }
+
+        const blocked = isDark || isFlatUniform || isRelativeDrop;
 
         if (blocked) {
           consecutiveBlocked++;
         } else {
           consecutiveBlocked = 0;
-          if (cameraBlocked) setCameraBlocked(false);
+          // Only learn the baseline from confirmed-clear frames.
+          baseline = baseline === null ? mean : baseline * 0.9 + mean * 0.1;
+          if (isCurrentlyBlocked) {
+            isCurrentlyBlocked = false;
+            setCameraBlocked(false);
+          }
         }
 
-        if (consecutiveBlocked >= 2 && !cameraBlocked) {
+        // Fire on first confirmed blocked read for a near-instant warning —
+        // the frame is already sampled every 1.5s so noise is minimal.
+        if (consecutiveBlocked >= 1 && !isCurrentlyBlocked) {
+          isCurrentlyBlocked = true;
           setCameraBlocked(true);
-          const nw = warnings + 1;
-          setWarnings(nw);
-          toast.error(`Warning ${nw}: Camera appears blocked or covered!`);
-          try {
-            await api.post(`/sessions/${sessionId}/events`, {
-              eventType: 'camera_blocked',
-              data: { mean: Math.round(mean), variance: Math.round(variance) },
-            });
-          } catch {}
-          const max = session.proctoring_settings?.max_warnings || 3;
-          if (nw >= max) {
-            setTerminated(true);
-            try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Camera blocked repeatedly' }); } catch {}
-          }
+          setWarnings(w => {
+            const nw = w + 1;
+            toast.error(`Warning ${nw}: Camera appears blocked or covered!`);
+            (async () => {
+              try {
+                await api.post(`/sessions/${sessionId}/events`, {
+                  eventType: 'camera_blocked',
+                  data: { mean: Math.round(mean), variance: Math.round(variance) },
+                });
+              } catch {}
+              const max = session.proctoring_settings?.max_warnings || 3;
+              if (nw >= max) {
+                setTerminated(true);
+                try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Camera blocked repeatedly' }); } catch {}
+              }
+            })();
+            return nw;
+          });
         }
       } catch (e) {
         // ignore — frame not ready yet
       }
     };
 
-    camCheckTimer.current = setInterval(checkFrame, 3000);
+    camCheckTimer.current = setInterval(checkFrame, 1500);
     return () => clearInterval(camCheckTimer.current);
-  }, [session, sessionId, submitted, warnings, cameraBlocked]);
+  }, [session, sessionId, submitted]);
 
   // AI frame analysis every 30s
   useEffect(() => {
@@ -402,34 +452,41 @@ export default function ExamTakePage() {
   // Tab switch detection
   useEffect(() => {
     if (!session || submitted) return;
-    const onVis = async () => {
+    const onVis = () => {
       if (!document.hidden) return;
-      const nw = warnings + 1;
-      setWarnings(nw);
-      toast.error(`Warning ${nw}: Tab switching detected!`);
-      try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'tab_switch' }); } catch {}
-      const max = session.proctoring_settings?.max_warnings || 3;
-      if (nw >= max) {
-        setTerminated(true);
-        try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Exceeded tab switch limit' }); } catch {}
-      }
+      if (isSubmitExitRef.current) return; // tab hidden as a side-effect of submitting — not a violation
+      setWarnings(w => {
+        const nw = w + 1;
+        toast.error(`Warning ${nw}: Tab switching detected!`);
+        (async () => {
+          try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'tab_switch' }); } catch {}
+          const max = session.proctoring_settings?.max_warnings || 3;
+          if (nw >= max) {
+            setTerminated(true);
+            try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Exceeded tab switch limit' }); } catch {}
+          }
+        })();
+        return nw;
+      });
     };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
-  }, [warnings, session, sessionId, submitted]);
+  }, [session, sessionId, submitted]);
 
-  // Copy/paste block
+  // Copy/paste detection — always logged as a violation so it shows up in the
+  // admin log, regardless of whether the exam is configured to actively block it.
   useEffect(() => {
-    if (!session?.proctoring_settings?.copy_paste_blocked) return;
-    const block = async (e) => {
-      e.preventDefault();
-      toast.error('Copy/paste is not allowed');
+    if (!session || submitted) return;
+    const blockEnabled = !!session.proctoring_settings?.copy_paste_blocked;
+    const onCopyPaste = async (e) => {
+      if (blockEnabled) e.preventDefault();
+      toast.error(blockEnabled ? 'Copy/paste is not allowed' : 'Copy/paste detected');
       try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'copy_paste' }); } catch {}
     };
-    document.addEventListener('copy', block);
-    document.addEventListener('paste', block);
-    return () => { document.removeEventListener('copy', block); document.removeEventListener('paste', block); };
-  }, [session, sessionId]);
+    document.addEventListener('copy', onCopyPaste);
+    document.addEventListener('paste', onCopyPaste);
+    return () => { document.removeEventListener('copy', onCopyPaste); document.removeEventListener('paste', onCopyPaste); };
+  }, [session, sessionId, submitted]);
 
   const formatTime = (s) => {
     const h   = Math.floor(s / 3600);
@@ -451,6 +508,7 @@ export default function ExamTakePage() {
     setSubmitting(true);
     clearInterval(timerRef.current);
     audio.stop();
+    isSubmitExitRef.current = true; // mark this exit as intentional BEFORE triggering it
     if (isFullscreenActive() && document.exitFullscreen) {
       try { await document.exitFullscreen(); } catch {}
     }
@@ -458,9 +516,15 @@ export default function ExamTakePage() {
       const formatted = Object.entries(answers).map(([questionId, answer]) => ({ questionId, answer, timeSpent: 0 }));
       await api.post(`/sessions/${sessionId}/submit`, { answers: formatted });
       setSubmitted(true);
-    } catch (err) { toast.error(err.response?.data?.error || 'Submission failed'); }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Submission failed');
+      isSubmitExitRef.current = false; // submission failed — resume normal violation detection
+      if (session?.proctoring_settings?.fullscreen_required && !isFullscreenActive()) {
+        setNeedsFullscreen(true);
+      }
+    }
     finally { setSubmitting(false); }
-  }, [sessionId, answers, submitting, submitted, audio]);
+  }, [sessionId, answers, submitting, submitted, audio, session]);
 
   // ── Screens ────────────────────────────────────────────
   if (loading) return (
@@ -509,8 +573,32 @@ export default function ExamTakePage() {
   return (
     <div ref={examRootRef} className="min-h-screen bg-surface-950 flex flex-col relative" style={{ userSelect:'none' }}>
 
+      {/* ── Webcam required overlay (Issue #1) ─────────────── */}
+      {webcamPermissionDenied && !terminated && !submitted && (
+        <div className="fixed inset-0 z-[110] bg-surface-950/98 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass rounded-2xl p-10 max-w-md text-center border border-red-500/30 bg-red-500/5">
+            <AlertTriangle size={48} className="text-red-400 mx-auto mb-4"/>
+            <h2 className="font-display text-2xl font-bold text-white mb-3">Camera Access Required</h2>
+            <p className="text-surface-400 mb-3">
+              This exam requires webcam access for proctoring. You must allow camera permission to continue.
+            </p>
+            <p className="text-surface-500 text-xs mb-6">
+              If nothing happens when you click below, your browser may have permanently blocked the camera for this
+              site — check the camera icon in your address bar (or Settings → Site permissions) and allow it, then retry.
+            </p>
+            <button onClick={retryWebcamAccess} disabled={webcamRetrying} className="btn-primary mx-auto">
+              {webcamRetrying
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>
+                : <Shield size={16}/>
+              }
+              Grant Camera Access &amp; Continue
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Fullscreen required overlay (Issue #1) ────────── */}
-      {needsFullscreen && !terminated && !submitted && (
+      {!webcamPermissionDenied && needsFullscreen && !terminated && !submitted && (
         <div className="fixed inset-0 z-[100] bg-surface-950/98 backdrop-blur-md flex items-center justify-center p-4">
           <div className="glass rounded-2xl p-10 max-w-md text-center border border-amber-500/30 bg-amber-500/5">
             <Maximize size={48} className="text-amber-400 mx-auto mb-4"/>
