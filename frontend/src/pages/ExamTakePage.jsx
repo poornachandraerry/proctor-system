@@ -213,6 +213,19 @@ export default function ExamTakePage() {
   const isFullscreenActive = () =>
     !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
 
+  // Capture a webcam frame as evidence and upload it, tagged to a violation type.
+  // Best-effort — never blocks or throws into the caller.
+  const captureEvidence = useCallback((alertType) => {
+    try {
+      if (!webcamRef.current || !webcamRef.current.videoWidth) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 240;
+      canvas.getContext('2d').drawImage(webcamRef.current, 0, 0, 320, 240);
+      const b64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+      api.post(`/evidence/session/${sessionId}/upload`, { imageBase64: b64, alertType }).catch(() => {});
+    } catch {}
+  }, [sessionId]);
+
   const retryWebcamAccess = useCallback(async () => {
     setWebcamRetrying(true);
     try { if (retryWebcamRef.current) await retryWebcamRef.current(); }
@@ -240,6 +253,7 @@ export default function ExamTakePage() {
           toast.error(`Warning ${nw}: You exited fullscreen mode!`);
           (async () => {
             try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'fullscreen_exit' }); } catch {}
+            captureEvidence('fullscreen_exit');
             const max = session.proctoring_settings?.max_warnings || 3;
             if (nw >= max) {
               setTerminated(true);
@@ -394,6 +408,7 @@ export default function ExamTakePage() {
                   data: { mean: Math.round(mean), variance: Math.round(variance) },
                 });
               } catch {}
+              captureEvidence('camera_blocked');
               const max = session.proctoring_settings?.max_warnings || 3;
               if (nw >= max) {
                 setTerminated(true);
@@ -460,6 +475,7 @@ export default function ExamTakePage() {
         toast.error(`Warning ${nw}: Tab switching detected!`);
         (async () => {
           try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'tab_switch' }); } catch {}
+          captureEvidence('tab_switch');
           const max = session.proctoring_settings?.max_warnings || 3;
           if (nw >= max) {
             setTerminated(true);
@@ -482,6 +498,7 @@ export default function ExamTakePage() {
       if (blockEnabled) e.preventDefault();
       toast.error(blockEnabled ? 'Copy/paste is not allowed' : 'Copy/paste detected');
       try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'copy_paste' }); } catch {}
+      captureEvidence('copy_paste');
     };
     document.addEventListener('copy', onCopyPaste);
     document.addEventListener('paste', onCopyPaste);

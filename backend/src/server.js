@@ -89,6 +89,7 @@ app.use('/api/public-exam', require('./routes/publicExamLink'));
 app.use('/api/question-banks', require('./routes/questionBanks'));
 app.use('/api/behaviour',      require('./routes/behaviour'));
 app.use('/api/audio',          require('./routes/audio'));
+app.use('/api/evidence',       require('./routes/evidence'));
 
 // ── Error handlers ─────────────────────────────────────────
 app.use((req, res) =>

@@ -3,23 +3,38 @@ import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, Download, Shield, AlertTriangle, CheckCircle,
-  XCircle, Clock, FileSpreadsheet, TrendingDown
+  XCircle, Clock, FileSpreadsheet, TrendingDown, Volume2, Camera, Flag
 } from 'lucide-react';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
+
+const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '');
+const fileUrl = (p) => p ? `${API_ORIGIN}${p}` : '';
 
 export default function ReportPage() {
   const { sessionId } = useParams();
   const [report, setReport]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [audioClips, setAudioClips] = useState([]);
+  const [screenshots, setScreenshots] = useState([]);
 
   useEffect(() => {
     api.get(`/reports/session/${sessionId}`)
       .then(r => setReport(r.data))
       .catch(() => toast.error('Failed to load report'))
       .finally(() => setLoading(false));
+    api.get(`/audio/session/${sessionId}`).then(r => setAudioClips(r.data)).catch(() => {});
+    api.get(`/evidence/session/${sessionId}`).then(r => setScreenshots(r.data)).catch(() => {});
   }, [sessionId]);
+
+  const flagClip = async (clipId) => {
+    try {
+      await api.patch(`/audio/clip/${clipId}/flag`, { flagReason: 'Flagged by examiner for review' });
+      setAudioClips(cs => cs.map(c => c.id === clipId ? { ...c, flagged: true } : c));
+      toast.success('Clip flagged for review');
+    } catch { toast.error('Failed to flag clip'); }
+  };
 
   const downloadExcel = async () => {
     setDownloading(true);
@@ -185,6 +200,57 @@ export default function ReportPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Audio recordings */}
+        <div className="card">
+          <h3 className="section-title mb-4 flex items-center gap-2"><Volume2 size={16}/>Audio Recordings ({audioClips.length})</h3>
+          {audioClips.length === 0 ? (
+            <div className="text-center py-8">
+              <Volume2 size={28} className="text-surface-600 mx-auto mb-2" />
+              <p className="text-sm text-surface-500">No audio clips recorded for this session</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+              {audioClips.map(c => (
+                <div key={c.id} className={`p-3 rounded-xl border ${c.flagged ? 'border-red-500/30 bg-red-500/5' : 'border-surface-700 bg-surface-800/50'}`}>
+                  <div className="flex items-center justify-between mb-2 text-xs">
+                    <span className="text-surface-400">{new Date(c.captured_at).toLocaleTimeString()} · {c.duration_s || 0}s</span>
+                    <button
+                      onClick={() => !c.flagged && flagClip(c.id)}
+                      disabled={c.flagged}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${c.flagged ? 'text-red-400 bg-red-500/10' : 'text-surface-400 hover:text-red-400'}`}
+                    >
+                      <Flag size={11}/>{c.flagged ? 'Flagged' : 'Flag'}
+                    </button>
+                  </div>
+                  <audio controls src={fileUrl(c.file_path)} className="w-full h-9" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Evidence screenshots */}
+        <div className="card">
+          <h3 className="section-title mb-4 flex items-center gap-2"><Camera size={16}/>Violation Snapshots ({screenshots.length})</h3>
+          {screenshots.length === 0 ? (
+            <div className="text-center py-8">
+              <Camera size={28} className="text-surface-600 mx-auto mb-2" />
+              <p className="text-sm text-surface-500">No snapshots captured for this session</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 max-h-80 overflow-y-auto pr-1">
+              {screenshots.map(s => (
+                <a key={s.id} href={fileUrl(s.file_path)} target="_blank" rel="noreferrer" className="block group">
+                  <img src={fileUrl(s.file_path)} alt="" className="w-full aspect-video object-cover rounded-lg border border-surface-700 group-hover:border-primary-500 transition-colors"/>
+                  <div className="text-[10px] text-surface-500 mt-1 truncate capitalize">
+                    {s.ai_analysis?.alertType?.replace(/_/g,' ') || 'periodic'} · {new Date(s.captured_at).toLocaleTimeString()}
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Answers table */}

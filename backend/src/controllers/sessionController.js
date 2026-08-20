@@ -1,5 +1,6 @@
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
+const { saveScreenshot } = require('../services/storageService');
 const {
   getOrgLimits, isLicenseValid, checkConcurrentLimit
 } = require('../services/licensingEnforcer');
@@ -17,6 +18,23 @@ async function startSession(req, res) {
       [examId, userId]
     );
     if (existing.rows.length) return res.json({ sessionId: existing.rows[0].id, resumed: true });
+
+    // One attempt per candidate per exam — block starting a new session if
+    // a previous attempt was already submitted or terminated.
+    const priorAttempt = await query(
+      "SELECT id, status FROM exam_sessions WHERE exam_id=$1 AND user_id=$2 AND status IN ('submitted','terminated') ORDER BY created_at DESC LIMIT 1",
+      [examId, userId]
+    );
+    if (priorAttempt.rows.length) {
+      return res.status(403).json({
+        error: priorAttempt.rows[0].status === 'terminated'
+          ? 'Your previous attempt at this exam was terminated for policy violations. You cannot retake it.'
+          : 'You have already submitted this exam. You cannot retake it.',
+        code: 'ALREADY_ATTEMPTED',
+        sessionId: priorAttempt.rows[0].id,
+        status: priorAttempt.rows[0].status,
+      });
+    }
 
     if (req.user.org_id) {
       const limits = await getOrgLimits(userId);
@@ -67,7 +85,7 @@ async function getSession(req, res) {
 async function updateSessionEvent(req, res) {
   try {
     const { id } = req.params;
-    const { eventType, data } = req.body;
+    const { eventType, data, snapshotBase64 } = req.body;
     const updates = {};
 
     if (eventType === 'tab_switch')       updates.tab_switches            = 'tab_switches + 1';
@@ -105,10 +123,28 @@ async function updateSessionEvent(req, res) {
         focus_lost:      'Browser window lost focus',
         camera_blocked:  'Webcam appears blocked, covered, or showing a dark/uniform frame',
       };
-      await query(
-        'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      const alertRes = await query(
+        'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
         [id, user_id, exam_id, eventType, severity, descriptions[eventType] || `${eventType} detected`, JSON.stringify(data || {})]
       );
+
+      // If the client captured a webcam frame at the moment of this violation,
+      // save it and link it to the alert so admins/examiners/org_admins can
+      // review visual evidence alongside the alert (see session evidence viewer).
+      if (snapshotBase64) {
+        try {
+          const filePath = await saveScreenshot(snapshotBase64, id);
+          if (filePath) {
+            await query(
+              `INSERT INTO session_screenshots (session_id, file_path, capture_type, event_type, alert_id)
+               VALUES ($1,$2,'violation',$3,$4)`,
+              [id, filePath, eventType, alertRes.rows[0]?.id || null]
+            );
+          }
+        } catch (snapErr) {
+          logger.error('evidence snapshot save error:', snapErr.message);
+        }
+      }
     }
     res.json({ success: true });
   } catch (error) {

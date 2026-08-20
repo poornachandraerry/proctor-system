@@ -279,6 +279,22 @@ async function checkExamAccess(req, res) {
     if (!examRes.rows.length) return res.status(404).json({ error: 'Exam not found' });
     const { access_type } = examRes.rows[0];
 
+    // One attempt per candidate per exam, regardless of access type.
+    const priorAttempt = await query(
+      "SELECT id, status FROM exam_sessions WHERE exam_id=$1 AND user_id=$2 AND status IN ('submitted','terminated') ORDER BY created_at DESC LIMIT 1",
+      [examId, userId]
+    );
+    if (priorAttempt.rows.length) {
+      return res.json({
+        allowed: false,
+        reason: priorAttempt.rows[0].status === 'terminated'
+          ? 'Your previous attempt at this exam was terminated for policy violations. You cannot retake it.'
+          : 'You have already submitted this exam. You cannot retake it.',
+        alreadyAttempted: true,
+        sessionId: priorAttempt.rows[0].id,
+      });
+    }
+
     if (access_type === 'open') return res.json({ allowed: true });
 
     const userRes = await query('SELECT email FROM users WHERE id=$1', [userId]);

@@ -30,6 +30,7 @@ export default function ExamDetailPage() {
   const [starting, setStarting]   = useState(false);
   const [downloading, setDl]      = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [access, setAccess]       = useState(null); // { allowed, alreadyAttempted, sessionId, reason }
 
   const isStaff = ['admin','org_admin','examiner'].includes(user?.role);
 
@@ -45,6 +46,11 @@ export default function ExamDetailPage() {
         if (isStaff) {
           const sRes = await api.get(`/exams/${id}/stats`);
           setStats(sRes.data);
+        } else {
+          try {
+            const aRes = await api.get(`/exam-access/check/${id}`);
+            setAccess(aRes.data);
+          } catch { /* non-fatal — Start Exam click will re-check anyway */ }
         }
       } catch { toast.error('Failed to load exam'); }
       finally { setLoading(false); }
@@ -84,14 +90,24 @@ export default function ExamDetailPage() {
       // Check access first
       const accessRes = await api.get(`/exam-access/check/${id}`);
       if (!accessRes.data.allowed) {
-        toast.error(accessRes.data.reason || 'You do not have access to this exam');
+        if (accessRes.data.alreadyAttempted) {
+          toast.error(accessRes.data.reason || 'You have already attempted this exam');
+          navigate(`/results/${accessRes.data.sessionId}`);
+        } else {
+          toast.error(accessRes.data.reason || 'You do not have access to this exam');
+        }
         setStarting(false);
         return;
       }
       const { data } = await api.post('/sessions/start', { examId: id });
       navigate(`/exam/${data.sessionId}/take`);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to start exam');
+      if (err.response?.data?.code === 'ALREADY_ATTEMPTED') {
+        toast.error(err.response.data.error);
+        navigate(`/results/${err.response.data.sessionId}`);
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to start exam');
+      }
       setStarting(false);
     }
   };
@@ -257,9 +273,20 @@ export default function ExamDetailPage() {
                 </>
               ) : (
                 exam.status === 'published' ? (
-                  <button onClick={handleStart} disabled={starting} className="btn-primary w-full justify-center py-3 text-base">
-                    {starting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Starting...</> : <><Play size={16}/>Start Exam</>}
-                  </button>
+                  access?.alreadyAttempted ? (
+                    <>
+                      <div className="text-center text-sm text-emerald-400 font-semibold py-2 flex items-center justify-center gap-1.5">
+                        <CheckCircle size={15}/>Already Submitted
+                      </div>
+                      <Link to={`/results/${access.sessionId}`} className="btn-secondary w-full justify-center">
+                        View Your Result
+                      </Link>
+                    </>
+                  ) : (
+                    <button onClick={handleStart} disabled={starting} className="btn-primary w-full justify-center py-3 text-base">
+                      {starting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Starting...</> : <><Play size={16}/>Start Exam</>}
+                    </button>
+                  )
                 ) : (
                   <div className="text-center text-sm text-surface-400 py-2">Exam not available yet</div>
                 )
