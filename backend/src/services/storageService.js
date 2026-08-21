@@ -8,6 +8,11 @@ const SPACEBYTE_FOLDER_ID = process.env.SPACEBYTE_FOLDER_ID
   ? parseInt(process.env.SPACEBYTE_FOLDER_ID, 10)
   : null;
 
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+};
+
 function assertConfigured() {
   if (!SPACEBYTE_TOKEN) {
     throw new Error('SPACEBYTE_API_TOKEN is not set — cannot upload evidence files');
@@ -25,13 +30,18 @@ async function uploadToSpaceByte(buffer, filename, mimeType) {
 
   const res = await fetch(`${SPACEBYTE_BASE}/uploads`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}` },
+    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}`, ...BROWSER_HEADERS },
     body: form,
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`SpaceByte upload failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`SpaceByte upload returned non-JSON response (likely blocked before reaching the API): ${text.slice(0, 200)}`);
   }
   const data = await res.json();
   if (!data.fileEntry) throw new Error('SpaceByte upload returned no fileEntry');
@@ -43,7 +53,7 @@ async function uploadToSpaceByte(buffer, filename, mimeType) {
 async function streamFromSpaceByte(hash) {
   assertConfigured();
   const res = await fetch(`${SPACEBYTE_BASE}/file-entries/download/${encodeURIComponent(hash)}`, {
-    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}` },
+    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}`, ...BROWSER_HEADERS },
   });
   if (!res.ok) {
     throw new Error(`SpaceByte download failed (${res.status})`);
@@ -62,7 +72,7 @@ async function saveScreenshot(base64Data, sessionId) {
     const { hash } = await uploadToSpaceByte(buffer, filename, 'image/jpeg');
     return `/files/spacebyte/${hash}`;
   } catch (err) {
-    logger.error('Screenshot save error:', err.message);
+    logger.error(`Screenshot save error: ${err.message}`);
     return null;
   }
 }
@@ -74,7 +84,7 @@ async function saveBuffer(buffer, filename, mimeType) {
     const { hash } = await uploadToSpaceByte(buffer, filename, mimeType);
     return `/files/spacebyte/${hash}`;
   } catch (err) {
-    logger.error('File save error:', err.message);
+    logger.error(`File save error: ${err.message}`);
     return null;
   }
 }
