@@ -2,13 +2,16 @@ const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { query } = require('../config/database');
 const { generateSessionReport, generateQuestionsTemplate, generateExamReport } = require('../services/excelService');
+const { canAccessSession, canAccessExam } = require('../utils/sessionAccess');
 
 router.use(authenticate);
 
 // JSON report (for frontend display)
-router.get('/session/:sessionId', authorize('admin','examiner'), async (req, res) => {
+router.get('/session/:sessionId', authorize('admin','org_admin','examiner'), async (req, res) => {
   try {
     const { sessionId } = req.params;
+    if (!(await canAccessSession(req.user, sessionId)))
+      return res.status(403).json({ error: 'Forbidden' });
     const session = await query(`
       SELECT es.*, u.first_name || ' ' || u.last_name as student_name, u.email,
         e.title as exam_title, e.total_marks, e.pass_percentage
@@ -34,9 +37,11 @@ router.get('/session/:sessionId', authorize('admin','examiner'), async (req, res
 });
 
 // Excel download — single session
-router.get('/session/:sessionId/excel', authorize('admin','examiner'), async (req, res) => {
+router.get('/session/:sessionId/excel', authorize('admin','org_admin','examiner'), async (req, res) => {
   try {
     const { sessionId } = req.params;
+    if (!(await canAccessSession(req.user, sessionId)))
+      return res.status(403).json({ error: 'Forbidden' });
     const session = await query(`
       SELECT es.*, u.first_name || ' ' || u.last_name as student_name, u.email,
         e.title as exam_title, e.total_marks, e.pass_percentage
@@ -68,10 +73,30 @@ router.get('/session/:sessionId/excel', authorize('admin','examiner'), async (re
   }
 });
 
-// Excel download — full exam overview (all sessions)
-router.get('/exam/:examId/excel', authorize('admin','examiner'), async (req, res) => {
+// JSON list of all sessions for an exam (for the admin Results tab)
+router.get('/exam/:examId/sessions', authorize('admin','org_admin','examiner'), async (req, res) => {
   try {
     const { examId } = req.params;
+    if (!(await canAccessExam(req.user, examId)))
+      return res.status(403).json({ error: 'Forbidden' });
+    const sessions = await query(`
+      SELECT es.id, es.status, es.created_at, es.submitted_at, es.total_suspicious_events,
+        u.first_name || ' ' || u.last_name as student_name, u.email,
+        COALESCE((SELECT SUM(marks_obtained) FROM answers WHERE session_id=es.id), 0) as marks_obtained,
+        (SELECT COUNT(*) FROM proctoring_alerts WHERE session_id=es.id) as alert_count
+      FROM exam_sessions es JOIN users u ON es.user_id=u.id
+      WHERE es.exam_id=$1 ORDER BY es.created_at DESC
+    `, [examId]);
+    res.json(sessions.rows);
+  } catch (err) { res.status(500).json({ error: 'Failed to load sessions' }); }
+});
+
+// Excel download — full exam overview (all sessions)
+router.get('/exam/:examId/excel', authorize('admin','org_admin','examiner'), async (req, res) => {
+  try {
+    const { examId } = req.params;
+    if (!(await canAccessExam(req.user, examId)))
+      return res.status(403).json({ error: 'Forbidden' });
     const exam = await query('SELECT * FROM exams WHERE id=$1', [examId]);
     if (!exam.rows.length) return res.status(404).json({ error: 'Exam not found' });
     const sessions = await query(`

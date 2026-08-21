@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Clock, Users, FileText, Shield, Monitor,
   Play, CheckCircle, FileSpreadsheet, Edit2, Mail,
-  Globe, Lock, Building2, Eye, EyeOff
+  Globe, Lock, Building2, Eye, EyeOff, AlertTriangle, XCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
@@ -31,6 +31,8 @@ export default function ExamDetailPage() {
   const [downloading, setDl]      = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [access, setAccess]       = useState(null); // { allowed, alreadyAttempted, sessionId, reason }
+  const [sessions, setSessions]   = useState([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
   const isStaff = ['admin','org_admin','examiner'].includes(user?.role);
 
@@ -46,6 +48,10 @@ export default function ExamDetailPage() {
         if (isStaff) {
           const sRes = await api.get(`/exams/${id}/stats`);
           setStats(sRes.data);
+          try {
+            const sessRes = await api.get(`/reports/exam/${id}/sessions`);
+            setSessions(sessRes.data);
+          } catch {} finally { setSessionsLoaded(true); }
         } else {
           try {
             const aRes = await api.get(`/exam-access/check/${id}`);
@@ -150,7 +156,7 @@ export default function ExamDetailPage() {
   const STAFF_TABS = [
     { id:'overview', label:'Overview'    },
     { id:'access',   label:'Access Control', badge: exam.access_type !== 'open' ? '●' : null },
-    { id:'results',  label:'Settings'    },
+    { id:'results',  label:'Results'    },
   ];
 
   return (
@@ -346,8 +352,47 @@ export default function ExamDetailPage() {
 
       {/* ── SETTINGS TAB ────────────────────────────────────── */}
       {activeTab === 'results' && isStaff && (
-        <div className="card max-w-lg space-y-4">
-          <h2 className="section-title mb-2">Result Settings</h2>
+        <div className="space-y-5">
+          <div className="card">
+            <h2 className="section-title mb-4">Candidates ({sessions.length})</h2>
+            {!sessionsLoaded ? (
+              <div className="text-sm text-surface-500 py-6 text-center">Loading...</div>
+            ) : sessions.length === 0 ? (
+              <div className="text-sm text-surface-500 py-8 text-center">No candidates have attempted this exam yet.</div>
+            ) : (
+              <div className="divide-y divide-surface-800">
+                {sessions.map(s => (
+                  <Link key={s.id} to={`/reports/${s.id}`}
+                    className="flex items-center justify-between py-3 px-2 -mx-2 rounded-lg hover:bg-surface-800/60 transition-colors group">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{s.student_name}</div>
+                      <div className="text-xs text-surface-500 truncate">{s.email}</div>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0 ml-3">
+                      {Number(s.alert_count) > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-amber-400">
+                          <AlertTriangle size={12}/>{s.alert_count}
+                        </span>
+                      )}
+                      <span className="text-xs text-surface-400 w-16 text-right">{s.marks_obtained ?? 0} marks</span>
+                      <span className={`text-xs px-2 py-1 rounded-full font-semibold border flex items-center gap-1 ${
+                        s.status === 'submitted'  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                        s.status === 'terminated' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                        s.status === 'active'     ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' :
+                        'bg-surface-700 text-surface-400 border-surface-600'}`}>
+                        {s.status === 'submitted' && <CheckCircle size={11}/>}
+                        {s.status === 'terminated' && <XCircle size={11}/>}
+                        {s.status}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card max-w-lg space-y-4">
+            <h2 className="section-title mb-2">Result Settings</h2>
           <div className="flex items-center justify-between p-4 bg-surface-800 rounded-xl border border-surface-700">
             <div>
               <div className="text-sm font-semibold text-white font-heading">Show Results to Students</div>
@@ -365,6 +410,7 @@ export default function ExamDetailPage() {
           <p className="text-xs text-surface-500">
             You can release results after reviewing all sessions. Toggle this on when you're ready for students to see their scores.
           </p>
+          </div>
         </div>
       )}
     </div>
