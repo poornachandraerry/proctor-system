@@ -1,21 +1,12 @@
 const { query } = require('../config/database');
 const multer = require('multer');
-const path   = require('path');
-const fs     = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../../uploads/audio', req.params.sessionId || 'unknown');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => cb(null, `${uuidv4()}.webm`),
-});
+const { canAccessSession } = require('../utils/sessionAccess');
+const { saveBuffer } = require('../services/storageService');
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = ['audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg'].includes(file.mimetype);
@@ -36,7 +27,9 @@ async function uploadAudioClip(req, res) {
     if (sess.rows[0].user_id !== req.user.id)
       return res.status(403).json({ error: 'Forbidden' });
 
-    const filePath = `/uploads/audio/${sessionId}/${req.file.filename}`;
+    const filePath = await saveBuffer(req.file.buffer, `audio-${sessionId}-${uuidv4()}.webm`, req.file.mimetype);
+    if (!filePath) return res.status(500).json({ error: 'Failed to store audio clip' });
+
     const r = await query(`
       INSERT INTO session_audio_clips
         (session_id, file_path, duration_s, file_size, clip_index)
@@ -53,6 +46,8 @@ async function uploadAudioClip(req, res) {
 
 async function getSessionAudio(req, res) {
   try {
+    if (!(await canAccessSession(req.user, req.params.sessionId)))
+      return res.status(403).json({ error: 'Forbidden' });
     const r = await query(
       'SELECT * FROM session_audio_clips WHERE session_id=$1 ORDER BY clip_index ASC',
       [req.params.sessionId]
@@ -64,6 +59,10 @@ async function getSessionAudio(req, res) {
 
 async function flagAudioClip(req, res) {
   try {
+    const clip = await query('SELECT session_id FROM session_audio_clips WHERE id=$1', [req.params.clipId]);
+    if (!clip.rows.length) return res.status(404).json({ error: 'Clip not found' });
+    if (!(await canAccessSession(req.user, clip.rows[0].session_id)))
+      return res.status(403).json({ error: 'Forbidden' });
     await query(
       'UPDATE session_audio_clips SET flagged=true, flag_reason=$1 WHERE id=$2',
       [req.body.flagReason || 'Flagged by proctor', req.params.clipId]

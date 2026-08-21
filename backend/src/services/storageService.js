@@ -1,45 +1,94 @@
-const fs = require('fs');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 
-const UPLOAD_DIR = path.join(__dirname, '../../uploads');
+const SPACEBYTE_BASE = 'https://spacebyte.in/api/v1';
+const SPACEBYTE_TOKEN = process.env.SPACEBYTE_API_TOKEN;
+// Optional — ID of a SpaceByte folder to keep evidence organized. If unset,
+// files upload to the root of the SpaceByte account.
+const SPACEBYTE_FOLDER_ID = process.env.SPACEBYTE_FOLDER_ID
+  ? parseInt(process.env.SPACEBYTE_FOLDER_ID, 10)
+  : null;
 
-// Ensure upload directories exist
-['screenshots', 'documents'].forEach(dir => {
-  const fullPath = path.join(UPLOAD_DIR, dir);
-  if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true });
-});
+function assertConfigured() {
+  if (!SPACEBYTE_TOKEN) {
+    throw new Error('SPACEBYTE_API_TOKEN is not set — cannot upload evidence files');
+  }
+}
+
+// Uploads a buffer to SpaceByte and returns { hash, id } for the created
+// FileEntry. `hash` is what we store and later use to stream the file back
+// through our own /files/spacebyte/:hash proxy route.
+async function uploadToSpaceByte(buffer, filename, mimeType) {
+  assertConfigured();
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: mimeType }), filename);
+  if (SPACEBYTE_FOLDER_ID) form.append('parentId', String(SPACEBYTE_FOLDER_ID));
+
+  const res = await fetch(`${SPACEBYTE_BASE}/uploads`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}` },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`SpaceByte upload failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  if (!data.fileEntry) throw new Error('SpaceByte upload returned no fileEntry');
+  return { hash: data.fileEntry.hash, id: data.fileEntry.id };
+}
+
+// Streams a file from SpaceByte by hash. Returns { body, contentType } where
+// body is a web ReadableStream, for piping directly into an Express response.
+async function streamFromSpaceByte(hash) {
+  assertConfigured();
+  const res = await fetch(`${SPACEBYTE_BASE}/file-entries/download/${encodeURIComponent(hash)}`, {
+    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}` },
+  });
+  if (!res.ok) {
+    throw new Error(`SpaceByte download failed (${res.status})`);
+  }
+  return {
+    body: res.body,
+    contentType: res.headers.get('content-type') || 'application/octet-stream',
+    contentLength: res.headers.get('content-length'),
+  };
+}
 
 async function saveScreenshot(base64Data, sessionId) {
   try {
-    const dir = path.join(UPLOAD_DIR, 'screenshots', sessionId);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const filename = `${uuidv4()}.jpg`;
-    const filepath = path.join(dir, filename);
     const buffer = Buffer.from(base64Data, 'base64');
-    fs.writeFileSync(filepath, buffer);
-    return `/uploads/screenshots/${sessionId}/${filename}`;
+    const filename = `evidence-${sessionId}-${Date.now()}.jpg`;
+    const { hash } = await uploadToSpaceByte(buffer, filename, 'image/jpeg');
+    return `/files/spacebyte/${hash}`;
   } catch (err) {
     logger.error('Screenshot save error:', err.message);
     return null;
   }
 }
 
-async function deleteSessionFiles(sessionId) {
+// Uploads an arbitrary buffer (e.g. an audio clip) and returns the same
+// `/files/spacebyte/<hash>` style path used elsewhere.
+async function saveBuffer(buffer, filename, mimeType) {
   try {
-    const dir = path.join(UPLOAD_DIR, 'screenshots', sessionId);
-    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
+    const { hash } = await uploadToSpaceByte(buffer, filename, mimeType);
+    return `/files/spacebyte/${hash}`;
   } catch (err) {
-    logger.error('Delete session files error:', err.message);
+    logger.error('File save error:', err.message);
+    return null;
   }
 }
 
-function getFileSize(filePath) {
-  try {
-    const stats = fs.statSync(path.join(UPLOAD_DIR, filePath));
-    return stats.size;
-  } catch { return 0; }
+// SpaceByte deletion would need the numeric FileEntry id, which we don't
+// currently persist alongside the hash — left as a no-op for now rather than
+// silently failing. Evidence files simply remain in the SpaceByte account.
+async function deleteSessionFiles(sessionId) {
+  logger.info(`deleteSessionFiles: no-op for SpaceByte-backed storage (session ${sessionId})`);
 }
 
-module.exports = { saveScreenshot, deleteSessionFiles, getFileSize };
+function getFileSize() {
+  // Not meaningful for remote storage; kept for backward compatibility.
+  return 0;
+}
+
+module.exports = { saveScreenshot, saveBuffer, streamFromSpaceByte, deleteSessionFiles, getFileSize };

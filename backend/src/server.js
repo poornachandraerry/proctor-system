@@ -57,7 +57,8 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Static files
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'))); // legacy local files, if any remain
+app.use('/files/spacebyte', require('./routes/spacebyteFiles'));
 
 // Health check
 app.get('/health', (req, res) =>
