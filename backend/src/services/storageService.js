@@ -19,33 +19,73 @@ function assertConfigured() {
   }
 }
 
-// Uploads a buffer to SpaceByte and returns { hash, id } for the created
-// FileEntry. `hash` is what we store and later use to stream the file back
-// through our own /files/spacebyte/:hash proxy route.
-async function uploadToSpaceByte(buffer, filename, mimeType) {
-  assertConfigured();
-  const form = new FormData();
-  form.append('file', new Blob([buffer], { type: mimeType }), filename);
-  if (SPACEBYTE_FOLDER_ID) form.append('parentId', String(SPACEBYTE_FOLDER_ID));
-
-  const res = await fetch(`${SPACEBYTE_BASE}/uploads`, {
+async function spacebyteJsonPost(path, body) {
+  const res = await fetch(`${SPACEBYTE_BASE}${path}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}`, ...BROWSER_HEADERS },
-    body: form,
+    headers: {
+      Authorization: `Bearer ${SPACEBYTE_TOKEN}`,
+      'Content-Type': 'application/json',
+      ...BROWSER_HEADERS,
+    },
+    body: JSON.stringify(body),
   });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`SpaceByte upload failed (${res.status}): ${text.slice(0, 300)}`);
-  }
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
     const text = await res.text().catch(() => '');
-    throw new Error(`SpaceByte upload returned non-JSON response (likely blocked before reaching the API): ${text.slice(0, 200)}`);
+    throw new Error(`${path} returned non-JSON response (status ${res.status}): ${text.slice(0, 200)}`);
   }
   const data = await res.json();
-  if (!data.fileEntry) throw new Error('SpaceByte upload returned no fileEntry');
-  return { hash: data.fileEntry.hash, id: data.fileEntry.id };
+  if (!res.ok) {
+    throw new Error(`${path} failed (${res.status}): ${data.message || JSON.stringify(data).slice(0, 300)}`);
+  }
+  return data;
+}
+
+// Uploads a buffer to SpaceByte via the S3 direct-upload flow (presign the
+// file bytes go straight to S3, bypassing the Cloudflare protection that
+// blocks the simpler /uploads endpoint when called from a datacenter IP,
+// then register the entry so it shows up in the SpaceByte account).
+// Returns { hash } — used to build our own /files/spacebyte/:hash proxy URL.
+async function uploadToSpaceByte(buffer, filename, mimeType) {
+  assertConfigured();
+  const extension = (filename.split('.').pop() || 'bin').toLowerCase();
+
+  // Step 1 — get a presigned S3 PUT URL
+  const presign = await spacebyteJsonPost('/s3/simple/presign', {
+    filename,
+    mime: mimeType,
+    size: buffer.length,
+    extension,
+  });
+  if (!presign.url || !presign.key) throw new Error('presign response missing url/key');
+
+  // Step 2 — upload the actual bytes directly to S3 (not spacebyte.in at all)
+  const putRes = await fetch(presign.url, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': mimeType,
+      'x-amz-acl': presign.acl || 'private',
+    },
+    body: buffer,
+  });
+  if (!putRes.ok) {
+    const text = await putRes.text().catch(() => '');
+    throw new Error(`S3 PUT upload failed (${putRes.status}): ${text.slice(0, 300)}`);
+  }
+
+  // Step 3 — register the entry in SpaceByte's database
+  const s3Filename = presign.key.split('/').pop();
+  const entry = await spacebyteJsonPost('/s3/entries', {
+    filename: s3Filename,
+    clientName: filename,
+    size: buffer.length,
+    clientMime: mimeType,
+    clientExtension: extension,
+    disk: 'uploads',
+    parentId: SPACEBYTE_FOLDER_ID,
+  });
+  if (!entry.fileEntry) throw new Error('s3/entries returned no fileEntry');
+  return { hash: entry.fileEntry.hash, id: entry.fileEntry.id };
 }
 
 // Streams a file from SpaceByte by hash. Returns { body, contentType } where
