@@ -48,7 +48,7 @@ app.use(cors({
   methods:        ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
 }));
-app.use(rateLimit({ windowMs: 15*60*1000, max: 1000, message: { error: 'Too many requests' } }));
+app.use(rateLimit({ windowMs: 15*60*1000, max: 20000, message: { error: 'Too many requests' } }));
 app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -57,7 +57,8 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Static files
-app.use('/uploads', express.static(path.join(__dirname, '../uploads'))); // legacy local files, if any remain
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../uploads');
+app.use('/uploads', express.static(UPLOAD_DIR));
 app.use('/files/spacebyte', require('./routes/spacebyteFiles'));
 
 // Health check
@@ -65,8 +66,10 @@ app.get('/health', (req, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' })
 );
 
-// Auth rate limiter
-const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 30 });
+// Auth rate limiter — raised well above default since students on the same
+// campus network commonly share one public IP; a low per-IP cap here would
+// lock out an entire class during a mock test's login rush.
+const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 500 });
 
 // ── Routes ─────────────────────────────────────────────────
 app.use('/api/auth',           authLimiter, require('./routes/auth'));

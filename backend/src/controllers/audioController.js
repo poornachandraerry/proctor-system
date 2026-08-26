@@ -27,7 +27,7 @@ async function uploadAudioClip(req, res) {
     if (sess.rows[0].user_id !== req.user.id)
       return res.status(403).json({ error: 'Forbidden' });
 
-    const filePath = await saveBuffer(req.file.buffer, `audio-${sessionId}-${uuidv4()}.webm`, req.file.mimetype);
+    const filePath = await saveBuffer(req.file.buffer, `audio-${uuidv4()}.webm`, req.file.mimetype, sessionId);
     if (!filePath) return res.status(500).json({ error: 'Failed to store audio clip' });
 
     const r = await query(`
