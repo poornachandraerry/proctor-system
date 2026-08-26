@@ -8,7 +8,7 @@ const api = axios.create({
 
 // Request interceptor - attach token
 api.interceptors.request.use((config) => {
-  const stored = localStorage.getItem('proctorai-auth');
+  const stored = sessionStorage.getItem('proctorai-auth');
   if (stored) {
     const { state } = JSON.parse(stored);
     if (state?.accessToken) config.headers.Authorization = `Bearer ${state.accessToken}`;
@@ -24,7 +24,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
       try {
-        const stored = localStorage.getItem('proctorai-auth');
+        const stored = sessionStorage.getItem('proctorai-auth');
         if (stored) {
           const { state } = JSON.parse(stored);
           if (state?.refreshToken) {
@@ -32,7 +32,7 @@ api.interceptors.response.use(
             original.headers.Authorization = `Bearer ${data.accessToken}`;
             // Update stored token
             const newState = { ...state, accessToken: data.accessToken };
-            localStorage.setItem('proctorai-auth', JSON.stringify({ state: newState }));
+            sessionStorage.setItem('proctorai-auth', JSON.stringify({ state: newState }));
             return api(original);
           }
         }

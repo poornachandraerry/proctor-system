@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import api from '../utils/api';
 
 const useAuthStore = create(
@@ -58,7 +58,16 @@ const useAuthStore = create(
         } catch { get().logout(); return false; }
       }
     }),
-    { name: 'proctorai-auth', partialize: (state) => ({ user: state.user, accessToken: state.accessToken, refreshToken: state.refreshToken, isAuthenticated: state.isAuthenticated }) }
+    {
+      name: 'proctorai-auth',
+      // sessionStorage is scoped per browser tab (unlike localStorage, which is
+      // shared across every tab of the same origin). Without this, an examiner's
+      // monitoring dashboard open in one tab and a candidate's exam in another
+      // tab of the same browser fight over the same stored token — a refresh in
+      // either tab silently overwrites the other's identity for all API calls.
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({ user: state.user, accessToken: state.accessToken, refreshToken: state.refreshToken, isAuthenticated: state.isAuthenticated }),
+    }
   )
 );
 

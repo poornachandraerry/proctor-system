@@ -69,7 +69,8 @@ async function getDashboard(req, res) {
           ORDER BY e.start_time ASC NULLS LAST
           LIMIT 8
         `, [userId, orgId || null]),
-        query(`SELECT es.id, es.submitted_at, es.status, e.title, e.total_marks, e.pass_percentage
+        query(`SELECT es.id, es.submitted_at, es.status, e.title, e.pass_percentage,
+            (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
           FROM exam_sessions es JOIN exams e ON es.exam_id=e.id
           WHERE es.user_id=$1 AND es.status='submitted'
           ORDER BY es.submitted_at DESC LIMIT 5`, [userId])

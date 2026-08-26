@@ -14,7 +14,8 @@ router.get('/session/:sessionId', authorize('admin','org_admin','examiner'), asy
       return res.status(403).json({ error: 'Forbidden' });
     const session = await query(`
       SELECT es.*, u.first_name || ' ' || u.last_name as student_name, u.email,
-        e.title as exam_title, e.total_marks, e.pass_percentage
+        e.title as exam_title, e.pass_percentage,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
       FROM exam_sessions es
       JOIN users u ON es.user_id=u.id
       JOIN exams e ON es.exam_id=e.id
@@ -44,7 +45,8 @@ router.get('/session/:sessionId/excel', authorize('admin','org_admin','examiner'
       return res.status(403).json({ error: 'Forbidden' });
     const session = await query(`
       SELECT es.*, u.first_name || ' ' || u.last_name as student_name, u.email,
-        e.title as exam_title, e.total_marks, e.pass_percentage
+        e.title as exam_title, e.pass_percentage,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
       FROM exam_sessions es
       JOIN users u ON es.user_id=u.id
       JOIN exams e ON es.exam_id=e.id
@@ -137,7 +139,8 @@ router.get('/session/:sessionId/scorecard', async (req, res) => {
     const { sessionId } = req.params;
     const session = await query(`
       SELECT es.*, u.first_name || ' ' || u.last_name as student_name, u.email,
-        e.title as exam_title, e.total_marks, e.pass_percentage, e.show_results_to_student
+        e.title as exam_title, e.pass_percentage, e.show_results_to_student,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
       FROM exam_sessions es
       JOIN users u ON es.user_id=u.id
       JOIN exams e ON es.exam_id=e.id
@@ -179,7 +182,8 @@ router.get('/my-result/:sessionId', authenticate, async (req, res) => {
   try {
     const { sessionId } = req.params;
     const session = await query(`
-      SELECT es.*, e.title as exam_title, e.total_marks, e.pass_percentage, e.show_results_to_student
+      SELECT es.*, e.title as exam_title, e.pass_percentage, e.show_results_to_student,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
       FROM exam_sessions es JOIN exams e ON es.exam_id=e.id WHERE es.id=$1
     `, [sessionId]);
     if (!session.rows.length) return res.status(404).json({ error: 'Session not found' });
@@ -203,7 +207,8 @@ router.get('/my-performance', authenticate, async (req, res) => {
     const userId = req.user.id;
     const r = await query(`
       SELECT es.id, es.submitted_at, es.risk_score, es.status,
-        e.title, e.total_marks, e.pass_percentage,
+        e.title, e.pass_percentage,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks,
         COALESCE((SELECT SUM(marks_obtained) FROM answers WHERE session_id=es.id), 0) as marks_obtained
       FROM exam_sessions es
       JOIN exams e ON es.exam_id=e.id
