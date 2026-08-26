@@ -8,8 +8,8 @@ const SPACEBYTE_FOLDER_ID = process.env.SPACEBYTE_FOLDER_ID
   ? parseInt(process.env.SPACEBYTE_FOLDER_ID, 10)
   : null;
 
-const BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+const SERVER_HEADERS = {
+  'User-Agent': 'ProctorAI-Backend/1.0',
   'Accept': 'application/json',
 };
 
@@ -25,7 +25,7 @@ async function spacebyteJsonPost(path, body) {
     headers: {
       Authorization: `Bearer ${SPACEBYTE_TOKEN}`,
       'Content-Type': 'application/json',
-      ...BROWSER_HEADERS,
+      ...SERVER_HEADERS,
     },
     body: JSON.stringify(body),
   });
@@ -93,7 +93,7 @@ async function uploadToSpaceByte(buffer, filename, mimeType) {
 async function streamFromSpaceByte(hash) {
   assertConfigured();
   const res = await fetch(`${SPACEBYTE_BASE}/file-entries/download/${encodeURIComponent(hash)}`, {
-    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}`, ...BROWSER_HEADERS },
+    headers: { Authorization: `Bearer ${SPACEBYTE_TOKEN}`, ...SERVER_HEADERS },
   });
   if (!res.ok) {
     throw new Error(`SpaceByte download failed (${res.status})`);
