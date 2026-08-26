@@ -309,6 +309,7 @@ export default function ExamDetailPage() {
                 {[
                   { label:'Webcam Required',       val: settings.webcam_required },
                   { label:'Fullscreen Mode',        val: settings.fullscreen_required },
+                  { label:'Screen Share Required',  val: settings.screen_share_required },
                   { label:'Tab Switching Blocked',  val: !settings.tab_switch_allowed },
                   { label:'Copy/Paste Blocked',     val: settings.copy_paste_blocked },
                   { label:'Face Detection',         val: settings.face_detection },

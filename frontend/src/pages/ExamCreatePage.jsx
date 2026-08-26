@@ -15,7 +15,7 @@ const DEFAULT_PROCTORING = {
   webcam_required: true, fullscreen_required: true,
   tab_switch_allowed: false, copy_paste_blocked: true,
   face_detection: true, gaze_tracking: true, ai_analysis: true,
-  screenshot_interval: 30, max_warnings: 3,
+  screenshot_interval: 30, max_warnings: 3, screen_share_required: false,
 };
 
 const EMPTY_Q = () => ({
@@ -480,6 +480,7 @@ export default function ExamCreatePage() {
           {[
             { key:'webcam_required',    label:'Require Webcam',          desc:'Students must have webcam on throughout' },
             { key:'fullscreen_required',label:'Require Fullscreen',       desc:'Exam must run fullscreen — alerts on exit' },
+            { key:'screen_share_required', label:'Require Screen Share', desc:'Captures a real screenshot of the other window when a tab-switch is detected (not just the webcam)' },
             { key:'tab_switch_allowed', label:'Allow Tab Switching',      desc:'When OFF, switching tabs triggers an alert' },
             { key:'copy_paste_blocked', label:'Block Copy & Paste',       desc:'Prevents copying questions or pasting answers' },
             { key:'face_detection',     label:'Face Detection (AI)',      desc:'Checks face is visible in webcam continuously' },

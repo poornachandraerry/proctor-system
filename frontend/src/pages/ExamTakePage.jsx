@@ -162,10 +162,14 @@ export default function ExamTakePage() {
   const [cameraBlocked, setCameraBlocked] = useState(false);
   const [webcamPermissionDenied, setWebcamPermissionDenied] = useState(false);
   const [webcamRetrying, setWebcamRetrying] = useState(false);
+  const [screenSharePermissionDenied, setScreenSharePermissionDenied] = useState(false);
+  const [screenShareRetrying, setScreenShareRetrying] = useState(false);
 
   const timerRef   = useRef(null);
   const webcamRef  = useRef(null);
   const camStream  = useRef(null);
+  const screenStream = useRef(null);
+  const screenVideoRef = useRef(null); // offscreen <video> fed by the screen-share stream, for frame capture
   const aiTimer    = useRef(null);
   const camCheckTimer = useRef(null);
   const examRootRef = useRef(null);
@@ -213,16 +217,22 @@ export default function ExamTakePage() {
   const isFullscreenActive = () =>
     !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
 
-  // Capture a webcam frame as evidence and upload it, tagged to a violation type.
+  // Capture a frame as evidence and upload it, tagged to a violation type.
+  // For tab_switch, prefer the screen-share stream (shows the other window
+  // the candidate navigated to) when available; otherwise falls back to the
+  // webcam, same as every other violation type.
   // Best-effort — never blocks or throws into the caller.
   const captureEvidence = useCallback((alertType) => {
     try {
-      if (!webcamRef.current || !webcamRef.current.videoWidth) return;
+      const useScreen = alertType === 'tab_switch' && screenVideoRef.current && screenVideoRef.current.videoWidth;
+      const source = useScreen ? screenVideoRef.current : webcamRef.current;
+      if (!source || !source.videoWidth) return;
       const canvas = document.createElement('canvas');
-      canvas.width = 320; canvas.height = 240;
-      canvas.getContext('2d').drawImage(webcamRef.current, 0, 0, 320, 240);
+      canvas.width = useScreen ? 640 : 320;
+      canvas.height = useScreen ? 400 : 240;
+      canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
       const b64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
-      api.post(`/evidence/session/${sessionId}/upload`, { imageBase64: b64, alertType }).catch(() => {});
+      api.post(`/evidence/session/${sessionId}/upload`, { imageBase64: b64, alertType, source: useScreen ? 'screen' : 'webcam' }).catch(() => {});
     } catch {}
   }, [sessionId]);
 
@@ -334,6 +344,46 @@ export default function ExamTakePage() {
       audio.stop();
     };
   }, [loading, session]);
+
+  // ── SCREEN SHARE for tab-switch evidence ────────────────
+  const retryScreenShareRef = useRef(null);
+  useEffect(() => {
+    if (loading || !session || !session.proctoring_settings?.screen_share_required) return;
+    let track = null;
+    const startScreenShare = async () => {
+      try {
+        const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 } });
+        screenStream.current = s;
+        if (screenVideoRef.current) screenVideoRef.current.srcObject = s;
+        track = s.getVideoTracks()[0];
+        if (track) {
+          // Fires if the candidate clicks the browser's native "Stop sharing"
+          // control mid-exam — treat that as a violation, same as any other
+          // attempt to remove proctoring visibility.
+          track.addEventListener('ended', async () => {
+            setScreenSharePermissionDenied(true);
+            try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'camera_blocked', data: { reason: 'screen_share_stopped' } }); } catch {}
+          });
+        }
+        setScreenSharePermissionDenied(false);
+      } catch {
+        toast.error('Screen sharing is required for this exam');
+        setScreenSharePermissionDenied(true);
+        try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'camera_blocked', data: { reason: 'screen_share_denied' } }); } catch {}
+      }
+    };
+    startScreenShare();
+    retryScreenShareRef.current = startScreenShare;
+    return () => {
+      if (screenStream.current) screenStream.current.getTracks().forEach(t => t.stop());
+    };
+  }, [loading, session, sessionId]);
+
+  const retryScreenShareAccess = useCallback(async () => {
+    setScreenShareRetrying(true);
+    try { if (retryScreenShareRef.current) await retryScreenShareRef.current(); }
+    finally { setScreenShareRetrying(false); }
+  }, []);
 
   // ── CAMERA OCCLUSION / DARKNESS DETECTION (Issue #2 fix) ─
   useEffect(() => {
@@ -614,8 +664,32 @@ export default function ExamTakePage() {
         </div>
       )}
 
+      {/* ── Screen share required overlay ───────────────────── */}
+      {!webcamPermissionDenied && screenSharePermissionDenied && !terminated && !submitted && (
+        <div className="fixed inset-0 z-[109] bg-surface-950/98 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass rounded-2xl p-10 max-w-md text-center border border-red-500/30 bg-red-500/5">
+            <AlertTriangle size={48} className="text-red-400 mx-auto mb-4"/>
+            <h2 className="font-display text-2xl font-bold text-white mb-3">Screen Sharing Required</h2>
+            <p className="text-surface-400 mb-3">
+              This exam requires you to share your entire screen for proctoring. You must allow screen sharing to continue.
+            </p>
+            <p className="text-surface-500 text-xs mb-6">
+              When prompted, choose "Entire Screen" (not just this tab) so violations can be properly recorded.
+              If you stop sharing during the exam, this screen will reappear.
+            </p>
+            <button onClick={retryScreenShareAccess} disabled={screenShareRetrying} className="btn-primary mx-auto">
+              {screenShareRetrying
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>
+                : <Shield size={16}/>
+              }
+              Grant Screen Share &amp; Continue
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Fullscreen required overlay (Issue #1) ────────── */}
-      {!webcamPermissionDenied && needsFullscreen && !terminated && !submitted && (
+      {!webcamPermissionDenied && !screenSharePermissionDenied && needsFullscreen && !terminated && !submitted && (
         <div className="fixed inset-0 z-[100] bg-surface-950/98 backdrop-blur-md flex items-center justify-center p-4">
           <div className="glass rounded-2xl p-10 max-w-md text-center border border-amber-500/30 bg-amber-500/5">
             <Maximize size={48} className="text-amber-400 mx-auto mb-4"/>
@@ -780,6 +854,7 @@ export default function ExamTakePage() {
           <div className="p-3 border-b border-surface-800">
             <div className={`relative rounded-xl overflow-hidden bg-surface-800 aspect-video ${cameraBlocked ? 'ring-2 ring-red-500' : ''}`}>
               <video ref={webcamRef} autoPlay muted playsInline className="w-full h-full object-cover"/>
+              <video ref={screenVideoRef} autoPlay muted playsInline className="hidden" aria-hidden="true"/>
               <div className={`absolute top-1.5 left-1.5 w-2 h-2 rounded-full ${cameraBlocked ? 'bg-red-500' : 'bg-red-500 animate-pulse'}`}/>
               <div className="absolute bottom-1.5 right-1.5 text-xs text-white bg-black/60 px-1 rounded font-mono">LIVE</div>
               {cameraBlocked && (
