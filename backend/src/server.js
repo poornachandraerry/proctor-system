@@ -41,7 +41,16 @@ const io = new Server(server, {
 initSocketIO(io);
 
 // ── Middleware ─────────────────────────────────────────────
-app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
+// Cross-Origin-Resource-Policy defaults to 'same-origin' in helmet, which
+// silently blocks <img>/<audio> tags from loading evidence files since the
+// frontend (app.proctorai.co.in) and backend (api.proctorai.co.in) are
+// different origins — showing as "(blocked)" in the browser network tab,
+// not a 404. Relaxing it to 'cross-origin' allows this legitimate case.
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 app.use(cors({
   origin:         process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials:    true,
