@@ -336,7 +336,15 @@ export default function ExamTakePage() {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         camStream.current = s;
-        if (webcamRef.current) webcamRef.current.srcObject = s;
+        if (webcamRef.current) {
+          webcamRef.current.srcObject = s;
+          // Some mobile browsers won't actually start rendering frames from
+          // an srcObject assigned inside an async callback just because the
+          // `autoplay` attribute is present — an explicit play() call is
+          // needed there, or the element sits on a black frame forever
+          // (and any canvas capture off it comes out blank too).
+          webcamRef.current.play?.().catch(() => {});
+        }
         track = s.getVideoTracks()[0];
         if (track) {
           track.addEventListener('mute', onTrackMute);
@@ -390,7 +398,10 @@ export default function ExamTakePage() {
       try {
         const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 } });
         screenStream.current = s;
-        if (screenVideoRef.current) screenVideoRef.current.srcObject = s;
+        if (screenVideoRef.current) {
+          screenVideoRef.current.srcObject = s;
+          screenVideoRef.current.play?.().catch(() => {});
+        }
         track = s.getVideoTracks()[0];
         if (track) {
           // Fires if the candidate clicks the browser's native "Stop sharing"

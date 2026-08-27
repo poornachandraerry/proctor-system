@@ -49,7 +49,10 @@ export default function ExamReadyPage() {
       const hasVideo = stream.getVideoTracks().length > 0;
       const hasAudio = stream.getAudioTracks().length > 0;
 
-      if (videoRef.current) videoRef.current.srcObject = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play?.().catch(() => {});
+      }
       setStatus({ camera: hasVideo ? 'ok' : 'error', mic: hasAudio ? 'ok' : 'error' });
 
       if (hasAudio) {
