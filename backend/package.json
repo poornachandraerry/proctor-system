@@ -14,7 +14,8 @@
     "db:migrate:v5": "node src/config/migrate_v5.js",
     "db:migrate:v6": "node src/config/migrate_v6.js",
     "db:migrate:v7": "node src/config/migrate_v7.js",
-    "db:setup:full": "npm run db:migrate && npm run db:seed && npm run db:migrate:v2 && npm run db:seed:v2 && npm run db:migrate:v3 && npm run db:migrate:v4 && npm run db:migrate:v5 && npm run db:migrate:v6 && npm run db:migrate:v7"
+    "db:migrate:v8": "node src/config/migrate_v8.js",
+    "db:setup:full": "npm run db:migrate && npm run db:seed && npm run db:migrate:v2 && npm run db:seed:v2 && npm run db:migrate:v3 && npm run db:migrate:v4 && npm run db:migrate:v5 && npm run db:migrate:v6 && npm run db:migrate:v7 && npm run db:migrate:v8"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

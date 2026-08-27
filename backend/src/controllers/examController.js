@@ -46,7 +46,8 @@ async function getExams(req, res) {
       SELECT e.*, u.first_name || ' ' || u.last_name as creator_name,
         (SELECT COUNT(*) FROM questions WHERE exam_id = e.id) as question_count,
         (SELECT COUNT(*) FROM exam_enrollments WHERE exam_id = e.id) as enrolled_count,
-        (SELECT COUNT(*) FROM exam_sessions WHERE exam_id = e.id AND status = 'active') as active_sessions
+        (SELECT COUNT(*) FROM exam_sessions WHERE exam_id = e.id AND status = 'active') as active_sessions,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id = e.id AND question_type IN ('mcq','true_false')) AS total_marks
       FROM exams e
       LEFT JOIN users u ON e.created_by = u.id
       LEFT JOIN users creator ON e.created_by = creator.id
@@ -67,7 +68,8 @@ async function getExam(req, res) {
     const result = await query(`
       SELECT e.*, u.first_name || ' ' || u.last_name as creator_name,
         (SELECT COUNT(*) FROM questions WHERE exam_id = e.id) as question_count,
-        (SELECT COUNT(*) FROM exam_enrollments WHERE exam_id = e.id) as enrolled_count
+        (SELECT COUNT(*) FROM exam_enrollments WHERE exam_id = e.id) as enrolled_count,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id = e.id AND question_type IN ('mcq','true_false')) AS total_marks
       FROM exams e LEFT JOIN users u ON e.created_by = u.id WHERE e.id = $1
     `, [id]);
     if (!result.rows.length) return res.status(404).json({ error: 'Exam not found' });

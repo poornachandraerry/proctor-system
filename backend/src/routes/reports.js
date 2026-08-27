@@ -99,7 +99,11 @@ router.get('/exam/:examId/excel', authorize('admin','org_admin','examiner'), asy
     const { examId } = req.params;
     if (!(await canAccessExam(req.user, examId)))
       return res.status(403).json({ error: 'Forbidden' });
-    const exam = await query('SELECT * FROM exams WHERE id=$1', [examId]);
+    const exam = await query(`
+      SELECT e.*,
+        (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
+      FROM exams e WHERE e.id=$1
+    `, [examId]);
     if (!exam.rows.length) return res.status(404).json({ error: 'Exam not found' });
     const sessions = await query(`
       SELECT es.*, u.first_name || ' ' || u.last_name as student_name, u.email,

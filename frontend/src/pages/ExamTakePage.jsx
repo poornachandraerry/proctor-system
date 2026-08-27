@@ -79,12 +79,20 @@ function useBehaviourTracker(sessionId) {
 }
 
 // ── Inline Audio Capture ───────────────────────────────────
-function useAudioCapture(sessionId, enabled) {
+// onContinuousSpeech fires when the mic picks up sustained voice-level
+// audio for longer than a normal spoken answer would run — a real proxy
+// for reading a question aloud to someone (a helper, a phone call, a
+// second device), not just background noise. Short pauses (thinking,
+// breathing) don't reset the streak; the mic just has to stay mostly
+// "talking" over the window.
+function useAudioCapture(sessionId, enabled, onContinuousSpeech) {
   const stream    = useRef(null);
   const recorder  = useRef(null);
   const chunks    = useRef([]);
   const clipIdx   = useRef(0);
   const interval  = useRef(null);
+  const audioCtx  = useRef(null);
+  const vadRaf    = useRef(null);
 
   const upload = useCallback(async (blob, idx) => {
     if (!blob || blob.size < 1000) return;
@@ -121,20 +129,80 @@ function useAudioCapture(sessionId, enabled) {
     if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
   }, []);
 
+  const startVAD = useCallback(() => {
+    if (!stream.current || !onContinuousSpeech) return;
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioContext();
+      audioCtx.current = ctx;
+      const source = ctx.createMediaStreamSource(stream.current);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+
+      const VOICE_THRESHOLD = 0.04;   // RMS above this counts as "talking"
+      const SUSTAIN_MS      = 9000;   // continuous talking longer than this fires a warning
+      const GRACE_MS        = 1800;   // short pauses within a sentence don't reset the streak
+      const COOLDOWN_MS     = 20000;  // don't re-fire again immediately after a warning
+
+      let talkingSinceMs = null;
+      let lastQuietAt = null;
+      let lastFiredAt = 0;
+
+      const tick = () => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        const now = Date.now();
+
+        if (rms > VOICE_THRESHOLD) {
+          lastQuietAt = null;
+          if (talkingSinceMs === null) talkingSinceMs = now;
+        } else {
+          if (talkingSinceMs !== null) {
+            if (lastQuietAt === null) lastQuietAt = now;
+            else if (now - lastQuietAt > GRACE_MS) talkingSinceMs = null; // real pause — reset
+          }
+        }
+
+        if (talkingSinceMs !== null && (now - talkingSinceMs) > SUSTAIN_MS && (now - lastFiredAt) > COOLDOWN_MS) {
+          lastFiredAt = now;
+          talkingSinceMs = now; // keep tracking in case it continues, but cooldown guards re-firing
+          onContinuousSpeech();
+        }
+
+        vadRaf.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch (e) { console.warn('Voice activity monitor unavailable:', e.message); }
+  }, [onContinuousSpeech]);
+
+  const stopVAD = useCallback(() => {
+    if (vadRaf.current) cancelAnimationFrame(vadRaf.current);
+    if (audioCtx.current) { audioCtx.current.close().catch(() => {}); audioCtx.current = null; }
+  }, []);
+
   const start = useCallback(async () => {
     if (!enabled || !sessionId) return;
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       startClip();
       interval.current = setInterval(() => { stopClip(); startClip(); }, 60000);
+      startVAD();
     } catch (e) { console.warn('Audio capture unavailable:', e.message); }
-  }, [enabled, sessionId, startClip, stopClip]);
+  }, [enabled, sessionId, startClip, stopClip, startVAD]);
 
   const stop = useCallback(() => {
     clearInterval(interval.current);
     stopClip();
+    stopVAD();
     if (stream.current) { stream.current.getTracks().forEach(t => t.stop()); stream.current = null; }
-  }, [stopClip]);
+  }, [stopClip, stopVAD]);
 
   useEffect(() => () => stop(), [stop]);
   return { start, stop };
@@ -175,8 +243,11 @@ export default function ExamTakePage() {
   const examRootRef = useRef(null);
   const isSubmitExitRef = useRef(false); // true while exitFullscreen() is called as part of a legitimate submit
 
+  const onContinuousSpeechRef = useRef(() => {});
+  const stableOnContinuousSpeech = useCallback(() => { onContinuousSpeechRef.current(); }, []);
+
   const behaviour = useBehaviourTracker(sessionId);
-  const audio     = useAudioCapture(sessionId, audioEnabled);
+  const audio     = useAudioCapture(sessionId, audioEnabled, stableOnContinuousSpeech);
 
   // Load session + questions
   useEffect(() => {
@@ -257,6 +328,30 @@ export default function ExamTakePage() {
     try { if (retryWebcamRef.current) await retryWebcamRef.current(); }
     finally { setWebcamRetrying(false); }
   }, []);
+
+  // Sustained talking during the exam (reading a question aloud to a
+  // helper, dictating over a call, a second person answering for the
+  // candidate) — flagged the same way as every other violation type:
+  // warning toast, evidence snapshot, and termination at max_warnings.
+  useEffect(() => {
+    onContinuousSpeechRef.current = () => {
+      if (!session || submitted) return;
+      setWarnings(w => {
+        const nw = w + 1;
+        toast.error(`Warning ${nw}: Continuous talking detected — please stay quiet during the exam`);
+        captureEvidence('continuous_speech');
+        (async () => {
+          try { await api.post(`/sessions/${sessionId}/events`, { eventType: 'continuous_speech', data: {} }); } catch {}
+        })();
+        const max = session.proctoring_settings?.max_warnings || 3;
+        if (nw >= max) {
+          setTerminated(true);
+          (async () => { try { await api.post(`/sessions/${sessionId}/terminate`, { reason: 'Continuous talking detected repeatedly' }); } catch {} })();
+        }
+        return nw;
+      });
+    };
+  }, [session, submitted, captureEvidence, sessionId]);
 
   // Require fullscreen at exam start if setting is enabled — only on
   // browsers that can actually grant it (see note above).
@@ -524,9 +619,13 @@ export default function ExamTakePage() {
     return () => clearInterval(camCheckTimer.current);
   }, [session, sessionId, submitted]);
 
-  // AI frame analysis every 30s
+  // AI frame analysis — tightened from 30s to 10s so face/gaze/multi-person
+  // issues are caught promptly rather than as a rare spot-check, and now
+  // actually enforced in real time (toast + warning count + termination at
+  // max_warnings) instead of only being logged silently for later review.
   useEffect(() => {
     if (!session?.proctoring_settings?.ai_analysis || submitted) return;
+    const intervalMs = (session.proctoring_settings?.ai_analysis_interval_seconds || 10) * 1000;
     aiTimer.current = setInterval(async () => {
       if (!webcamRef.current || submitted) return;
       try {
@@ -534,9 +633,32 @@ export default function ExamTakePage() {
         canvas.width = 320; canvas.height = 240;
         canvas.getContext('2d').drawImage(webcamRef.current, 0, 0, 320, 240);
         const b64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
-        await api.post('/ai/analyze-frame', { sessionId, imageBase64: b64 });
+        const { data: analysis } = await api.post('/ai/analyze-frame', { sessionId, imageBase64: b64 });
+
+        const issue =
+          analysis.face_detected === false ? 'No face detected — please stay visible on camera' :
+          analysis.multiple_faces === true ? 'Multiple people detected in frame' :
+          analysis.looking_away === true ? 'Please keep looking at the screen' :
+          analysis.suspicious_objects === true ? 'Unauthorized material detected (phone/notes)' :
+          null;
+
+        if (issue) {
+          setWarnings(w => {
+            const nw = w + 1;
+            toast.error(`Warning ${nw}: ${issue}`);
+            captureEvidence('ai_detection');
+            const max = session.proctoring_settings?.max_warnings || 3;
+            if (nw >= max) {
+              setTerminated(true);
+              (async () => {
+                try { await api.post(`/sessions/${sessionId}/terminate`, { reason: issue }); } catch {}
+              })();
+            }
+            return nw;
+          });
+        }
       } catch {}
-    }, 30000);
+    }, intervalMs);
     return () => clearInterval(aiTimer.current);
   }, [session, sessionId, submitted]);
 

@@ -9,19 +9,46 @@ async function analyzeFrame(req, res) {
 
     const analysis = await analyzeWebcamFrame(imageBase64);
 
-    // Create alerts for issues found
-    if (sessionId && analysis.flags && analysis.flags.length > 0) {
+    if (sessionId) {
       const session = await query('SELECT exam_id, user_id FROM exam_sessions WHERE id=$1', [sessionId]);
       if (session.rows.length) {
         const { exam_id, user_id } = session.rows[0];
-        for (const flag of analysis.flags) {
-          await query(
-            'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description, ai_confidence) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-            [sessionId, user_id, exam_id, 'ai_detection', 'high', flag, analysis.confidence]
-          );
+
+        // Act directly on the structured fields the model returns — don't
+        // rely solely on its freeform `flags` list, which may describe the
+        // same issue in inconsistent wording (or omit it) even when the
+        // boolean itself is set. Each specific issue gets its own clearly
+        // labeled alert and increments the counter the risk score actually
+        // reads, instead of only the generic total_suspicious_events tally.
+        const events = [];
+        if (analysis.face_detected === false)
+          events.push({ type: 'face_not_detected', desc: 'No face detected in webcam frame' });
+        if (analysis.multiple_faces === true)
+          events.push({ type: 'multiple_faces', desc: 'Multiple people detected in webcam frame', counter: 'multiple_faces_detected' });
+        if (analysis.looking_away === true)
+          events.push({ type: 'gaze_away', desc: 'Candidate appears to be looking away from the screen', counter: 'gaze_away_count' });
+        if (analysis.suspicious_objects === true)
+          events.push({ type: 'suspicious_object', desc: 'A phone, notes, or other unauthorized material appears visible' });
+        // Any other freeform issue the model noticed that isn't already covered above
+        for (const flag of (analysis.flags || [])) {
+          if (!events.some(e => flag.toLowerCase().includes(e.type.split('_')[0]))) {
+            events.push({ type: 'ai_detection', desc: flag });
+          }
         }
-        await query('UPDATE exam_sessions SET total_suspicious_events = total_suspicious_events + $1 WHERE id=$2',
-          [analysis.flags.length, sessionId]);
+
+        if (events.length) {
+          for (const ev of events) {
+            await query(
+              'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description, ai_confidence) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+              [sessionId, user_id, exam_id, ev.type, ev.type === 'face_not_detected' || ev.type === 'multiple_faces' ? 'high' : 'medium', ev.desc, analysis.confidence]
+            );
+            if (ev.counter) {
+              await query(`UPDATE exam_sessions SET ${ev.counter} = ${ev.counter} + 1 WHERE id=$1`, [sessionId]);
+            }
+          }
+          await query('UPDATE exam_sessions SET total_suspicious_events = total_suspicious_events + $1 WHERE id=$2',
+            [events.length, sessionId]);
+        }
       }
     }
     res.json(analysis);

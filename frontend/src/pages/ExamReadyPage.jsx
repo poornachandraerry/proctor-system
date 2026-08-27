@@ -3,13 +3,41 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Camera, Mic, CheckCircle2, XCircle, Loader2, ArrowLeft,
-  Play, RefreshCw, AlertTriangle, Maximize
+  Play, RefreshCw, AlertTriangle, Maximize, ClipboardList,
+  MonitorX, Volume2, Eye, Clock, Copy, ShieldAlert
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 
 // 'checking' | 'ok' | 'denied' | 'error'
 const initialStatus = { camera: 'checking', mic: 'checking' };
+
+// Human-readable guideline copy, built dynamically from whichever settings
+// this specific exam actually has turned on — a candidate should only be
+// asked to agree to rules that actually apply to their exam.
+const buildGuidelines = (settings = {}) => {
+  const items = [
+    { key: 'always', icon: Eye, text: 'Stay visible on camera and remain alone in the room for the entire exam.' },
+  ];
+  if (settings.fullscreen_required)
+    items.push({ key: 'fullscreen', icon: Maximize, text: 'The exam must be taken in fullscreen. Exiting fullscreen will be logged as a violation.' });
+  if (settings.webcam_required !== false)
+    items.push({ key: 'webcam', icon: Camera, text: 'Do not cover, block, or turn away from your webcam at any point.' });
+  items.push({ key: 'talk', icon: Volume2, text: 'Do not talk, read questions aloud, or take help from another person — sustained talking is detected automatically.' });
+  if (settings.ai_analysis)
+    items.push({ key: 'ai', icon: ShieldAlert, text: 'Your webcam is periodically analyzed to detect multiple people, a missing face, or unauthorized material like phones or notes.' });
+  if (settings.screen_share_required)
+    items.push({ key: 'screen', icon: MonitorX, text: 'Screen sharing is required on supported devices (desktop/laptop browsers). Do not open other windows, tabs, or applications during the exam.' });
+  if (settings.copy_paste_blocked)
+    items.push({ key: 'copypaste', icon: Copy, text: 'Copy and paste are disabled during this exam.' });
+  items.push({ key: 'tabswitch', icon: ClipboardList, text: 'Switching browser tabs or losing window focus is logged as a violation.' });
+  if (settings.max_warnings)
+    items.push({ key: 'warnings', icon: AlertTriangle, text: `You will be given up to ${settings.max_warnings} warnings. Exceeding this will end your exam automatically and it cannot be retaken.` });
+  else
+    items.push({ key: 'warnings', icon: AlertTriangle, text: 'Repeated violations will end your exam automatically and it cannot be retaken.' });
+  items.push({ key: 'time', icon: Clock, text: 'Once started, the timer cannot be paused. Make sure you have a stable internet connection before beginning.' });
+  return items;
+};
 
 export default function ExamReadyPage() {
   const { id } = useParams(); // examId
@@ -19,6 +47,7 @@ export default function ExamReadyPage() {
   const [status, setStatus]   = useState(initialStatus);
   const [micLevel, setMicLevel] = useState(0);
   const [starting, setStarting] = useState(false);
+  const [guidelinesAccepted, setGuidelinesAccepted] = useState(false);
 
   const videoRef   = useRef(null);
   const streamRef  = useRef(null);
@@ -93,7 +122,8 @@ export default function ExamReadyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const ready = status.camera === 'ok' && status.mic === 'ok';
+  const ready = status.camera === 'ok' && status.mic === 'ok' &&
+    (exam?.guidelines_ack_required === false || guidelinesAccepted);
 
   const handleStartExam = async () => {
     // Fullscreen must be requested synchronously inside this click handler —
@@ -127,7 +157,7 @@ export default function ExamReadyPage() {
         }
         return;
       }
-      const { data } = await api.post('/sessions/start', { examId: id });
+      const { data } = await api.post('/sessions/start', { examId: id, guidelinesAccepted: exam?.guidelines_ack_required === false ? undefined : true });
       navigate(`/exam/${data.sessionId}/take`);
     } catch (err) {
       if (err.response?.data?.code === 'ALREADY_ATTEMPTED') {
@@ -241,6 +271,34 @@ export default function ExamReadyPage() {
             </div>
           )}
 
+          {/* Exam guidelines + acceptance */}
+          {exam && exam.guidelines_ack_required !== false && (
+            <div className="mb-5">
+              <h2 className="text-sm font-semibold text-white mb-2 flex items-center gap-1.5">
+                <ClipboardList size={15} className="text-primary-400"/>Exam Guidelines
+              </h2>
+              <div className="bg-surface-800/60 border border-surface-700/60 rounded-xl p-4 space-y-2.5 max-h-56 overflow-y-auto mb-3">
+                {buildGuidelines(exam.proctoring_settings).map(({ key, icon: Icon, text }) => (
+                  <div key={key} className="flex items-start gap-2.5">
+                    <Icon size={14} className="text-surface-400 shrink-0 mt-0.5"/>
+                    <p className="text-xs text-surface-300 leading-relaxed">{text}</p>
+                  </div>
+                ))}
+              </div>
+              <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={guidelinesAccepted}
+                  onChange={e => setGuidelinesAccepted(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-surface-600 bg-surface-800 text-primary-500 focus:ring-primary-500 focus:ring-offset-surface-900 shrink-0"
+                />
+                <span className="text-xs text-surface-300 leading-relaxed">
+                  I have read and agree to follow these exam guidelines. I understand violations are automatically detected and may end my exam.
+                </span>
+              </label>
+            </div>
+          )}
+
           <div className="flex gap-2">
             {!ready && (
               <button onClick={startCheck} className="btn-secondary flex-1 justify-center py-3">
@@ -254,7 +312,11 @@ export default function ExamReadyPage() {
             >
               {starting
                 ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Starting...</>
-                : <><Play size={16}/>{ready ? 'Start Exam' : 'Waiting for camera & mic'}</>
+                : <><Play size={16}/>{
+                    status.camera !== 'ok' || status.mic !== 'ok' ? 'Waiting for camera & mic' :
+                    !ready ? 'Accept guidelines to continue' :
+                    'Start Exam'
+                  }</>
               }
             </button>
           </div>

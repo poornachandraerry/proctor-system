@@ -27,7 +27,8 @@ async function getDashboard(req, res) {
         query('SELECT COUNT(*) as total FROM exams WHERE created_by=$1', [userId]),
         query("SELECT COUNT(*) as total FROM exam_sessions es JOIN exams e ON es.exam_id=e.id WHERE e.created_by=$1 AND es.status='active'", [userId]),
         query("SELECT COUNT(*) as unreviewed FROM proctoring_alerts pa JOIN exams e ON pa.exam_id=e.id WHERE e.created_by=$1 AND pa.is_reviewed=false", [userId]),
-        query(`SELECT e.*, (SELECT COUNT(*) FROM exam_sessions WHERE exam_id=e.id) as session_count
+        query(`SELECT e.*, (SELECT COUNT(*) FROM exam_sessions WHERE exam_id=e.id) as session_count,
+            (SELECT COALESCE(SUM(marks),0) FROM questions WHERE exam_id=e.id AND question_type IN ('mcq','true_false')) AS total_marks
           FROM exams e WHERE created_by=$1 ORDER BY created_at DESC LIMIT 5`, [userId])
       ]);
       res.json({

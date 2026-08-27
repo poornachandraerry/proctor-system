@@ -52,9 +52,13 @@ async function startSession(req, res) {
       }
     }
 
+    if (exam.rows[0].guidelines_ack_required !== false && !req.body.guidelinesAccepted) {
+      return res.status(400).json({ error: 'You must review and accept the exam guidelines before starting.', code: 'GUIDELINES_NOT_ACCEPTED' });
+    }
+
     const result = await query(
-      'INSERT INTO exam_sessions (exam_id, user_id, ip_address, user_agent, browser_info) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [examId, userId, req.ip, req.headers['user-agent'], JSON.stringify(req.body.browserInfo || {})]
+      'INSERT INTO exam_sessions (exam_id, user_id, ip_address, user_agent, browser_info, guidelines_ack_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [examId, userId, req.ip, req.headers['user-agent'], JSON.stringify(req.body.browserInfo || {}), req.body.guidelinesAccepted ? new Date() : null]
     );
     res.status(201).json({ sessionId: result.rows[0].id, session: result.rows[0] });
   } catch (error) {
@@ -95,6 +99,7 @@ async function updateSessionEvent(req, res) {
     if (eventType === 'multiple_faces')   updates.multiple_faces_detected = 'multiple_faces_detected + 1';
     if (eventType === 'gaze_away')        updates.gaze_away_count         = 'gaze_away_count + 1';
     if (eventType === 'camera_blocked')   updates.camera_blocked_count    = 'COALESCE(camera_blocked_count,0) + 1';
+    if (eventType === 'continuous_speech') updates.continuous_speech_count = 'COALESCE(continuous_speech_count,0) + 1';
 
     let setClause = 'total_suspicious_events = total_suspicious_events + 1, updated_at = NOW()';
     for (const [col, expr] of Object.entries(updates)) setClause += `, ${col} = ${expr}`;
@@ -108,6 +113,7 @@ async function updateSessionEvent(req, res) {
       gaze_away:        'low',
       focus_lost:       'medium',
       camera_blocked:   'critical',
+      continuous_speech: 'high',
     };
     const severity = severityMap[eventType] || 'low';
 
@@ -122,6 +128,7 @@ async function updateSessionEvent(req, res) {
         gaze_away:       'Student looked away from screen for an extended period',
         focus_lost:      'Browser window lost focus',
         camera_blocked:  'Webcam appears blocked, covered, or showing a dark/uniform frame',
+        continuous_speech: 'Sustained talking detected during the exam',
       };
       const alertRes = await query(
         'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
