@@ -202,6 +202,22 @@ export default function ExamTakePage() {
   }, [currentQ, questions]);
 
   // ── FULLSCREEN ENFORCEMENT (Issue #1 fix) ───────────────
+  // Many mobile browsers — iOS Safari in particular, and some Android
+  // in-app/webview browsers — do NOT implement the Fullscreen API for
+  // ordinary web content at all (iOS only supports it for <video>
+  // playback). On those browsers requestFullscreen() either doesn't
+  // exist or silently no-ops, so document.fullscreenElement can never
+  // become truthy no matter how many times the candidate taps "Enable
+  // Fullscreen" — the browser's address bar auto-hiding on scroll just
+  // *looks* like fullscreen, which is why it seems stuck. Gating exam
+  // entry on an API the device can't support would lock candidates out
+  // permanently, so we detect support up front and skip the requirement
+  // (with a one-time heads-up) rather than enforce something impossible.
+  const isFullscreenSupported = () => {
+    const el = document.documentElement;
+    return !!(el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
+  };
+
   const requestFullscreen = useCallback(async () => {
     const el = examRootRef.current || document.documentElement;
     try {
@@ -242,17 +258,23 @@ export default function ExamTakePage() {
     finally { setWebcamRetrying(false); }
   }, []);
 
-  // Require fullscreen at exam start if setting is enabled
+  // Require fullscreen at exam start if setting is enabled — only on
+  // browsers that can actually grant it (see note above).
   useEffect(() => {
     if (loading || !session || submitted) return;
-    if (session.proctoring_settings?.fullscreen_required && !isFullscreenActive()) {
-      setNeedsFullscreen(true);
+    if (!session.proctoring_settings?.fullscreen_required) return;
+    if (!isFullscreenSupported()) {
+      toast('Fullscreen isn\'t supported on this browser — please stay on this tab for the rest of the exam.', { icon: 'ℹ️', duration: 5000 });
+      return;
     }
+    if (!isFullscreenActive()) setNeedsFullscreen(true);
   }, [loading, session, submitted]);
 
-  // Detect fullscreen exit during exam and log a violation
+  // Detect fullscreen exit during exam and log a violation — skipped
+  // entirely on browsers where fullscreen was never actually attainable.
   useEffect(() => {
     if (!session?.proctoring_settings?.fullscreen_required || submitted) return;
+    if (!isFullscreenSupported()) return;
 
     const onFsChange = () => {
       if (isSubmitExitRef.current) return; // legitimate exit as part of submitting — not a violation
