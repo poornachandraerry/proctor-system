@@ -368,9 +368,23 @@ export default function ExamTakePage() {
   }, [loading, session]);
 
   // ── SCREEN SHARE for tab-switch evidence ────────────────
+  // getDisplayMedia() — the screen-capture API — isn't implemented by any
+  // mobile browser (iOS Safari or Android Chrome); it's desktop-only. On a
+  // phone the call either doesn't exist or always rejects, so requiring it
+  // traps candidates on the "Screen Sharing Required" screen with no way
+  // through. As with fullscreen, we detect support up front and skip the
+  // requirement gracefully on devices that can't provide it, falling back
+  // to webcam + tab-switch detection for those candidates instead.
+  const isScreenShareSupported = () =>
+    !!(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function');
+
   const retryScreenShareRef = useRef(null);
   useEffect(() => {
     if (loading || !session || !session.proctoring_settings?.screen_share_required) return;
+    if (!isScreenShareSupported()) {
+      toast('Screen sharing isn\'t supported on this device — proctoring will continue via webcam only.', { icon: 'ℹ️', duration: 5000 });
+      return;
+    }
     let track = null;
     const startScreenShare = async () => {
       try {
