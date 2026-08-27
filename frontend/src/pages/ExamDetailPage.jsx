@@ -73,27 +73,14 @@ export default function ExamDetailPage() {
   };
 
   const handleStart = async () => {
-    // Request fullscreen FIRST and synchronously within this click handler —
-    // browsers only allow requestFullscreen() inside a direct user-gesture
-    // callback, not after any awaited network calls. Since we navigate with
-    // client-side routing (no full page reload), fullscreen carries over to
-    // the exam-taking page seamlessly.
-    if (exam?.proctoring_settings?.fullscreen_required) {
-      try {
-        const el = document.documentElement;
-        if (el.requestFullscreen) await el.requestFullscreen();
-        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
-        else if (el.msRequestFullscreen) await el.msRequestFullscreen();
-      } catch (e) {
-        // Fullscreen might be blocked (e.g. iframe, browser setting) —
-        // ExamTakePage shows a fallback "Enter Fullscreen" prompt in that case.
-        console.warn('Fullscreen request failed:', e.message);
-      }
-    }
-
+    // A quick access check up front lets us bounce straight to the results
+    // page for an already-submitted attempt, without asking the candidate
+    // for camera/mic permission on the readiness page for nothing. The real
+    // fullscreen request + session start happens on the readiness page,
+    // where "I'm ready — Start Exam" is itself a fresh user gesture (needed
+    // because requestFullscreen() only works inside a direct click handler).
     setStarting(true);
     try {
-      // Check access first
       const accessRes = await api.get(`/exam-access/check/${id}`);
       if (!accessRes.data.allowed) {
         if (accessRes.data.alreadyAttempted) {
@@ -105,14 +92,13 @@ export default function ExamDetailPage() {
         setStarting(false);
         return;
       }
-      const { data } = await api.post('/sessions/start', { examId: id });
-      navigate(`/exam/${data.sessionId}/take`);
+      navigate(`/exam/${id}/ready`);
     } catch (err) {
       if (err.response?.data?.code === 'ALREADY_ATTEMPTED') {
         toast.error(err.response.data.error);
         navigate(`/results/${err.response.data.sessionId}`);
       } else {
-        toast.error(err.response?.data?.error || 'Failed to start exam');
+        toast.error(err.response?.data?.error || 'Failed to check exam access');
       }
       setStarting(false);
     }
@@ -160,7 +146,7 @@ export default function ExamDetailPage() {
   ];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link to="/exams" className="p-2 rounded-xl hover:bg-surface-800 text-surface-400 hover:text-white transition-colors">

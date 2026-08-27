@@ -186,7 +186,7 @@ export default function ExamCreatePage() {
   ];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <button onClick={() => navigate('/exams')} className="p-2 rounded-xl hover:bg-surface-800 text-surface-400 hover:text-white transition-colors">

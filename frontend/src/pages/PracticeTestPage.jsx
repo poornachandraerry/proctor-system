@@ -85,7 +85,7 @@ export default function PracticeTestPage() {
     const wrong     = Object.values(results.results).filter(r => !r.correct).length;
 
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-3xl mx-auto">
         <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} className="space-y-5">
           {/* Hero */}
           <div className={`rounded-2xl p-8 text-center border ${

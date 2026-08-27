@@ -746,9 +746,9 @@ export default function ExamTakePage() {
           style={{ width: `${questions.length ? (answered / questions.length) * 100 : 0}%` }}/>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 overflow-y-auto lg:overflow-hidden">
         {/* Question area */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {q && (
             <AnimatePresence mode="wait">
               <motion.div key={currentQ}
@@ -849,7 +849,7 @@ export default function ExamTakePage() {
         </div>
 
         {/* Sidebar */}
-        <div className="w-56 bg-surface-900 border-l border-surface-800 flex flex-col shrink-0">
+        <div className="w-full lg:w-56 bg-surface-900 border-t lg:border-t-0 lg:border-l border-surface-800 flex flex-col shrink-0">
           {/* Webcam */}
           <div className="p-3 border-b border-surface-800">
             <div className={`relative rounded-xl overflow-hidden bg-surface-800 aspect-video ${cameraBlocked ? 'ring-2 ring-red-500' : ''}`}>

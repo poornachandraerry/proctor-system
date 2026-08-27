@@ -105,14 +105,14 @@ export default function ExamsPage() {
   );
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
         <div>
           <h1 className="page-title">{isStaff ? 'Exam Management' : 'Available Exams'}</h1>
           <p className="text-surface-400 text-sm mt-1">{total} exam{total !== 1 ? 's' : ''}</p>
         </div>
         {isStaff && (
-          <Link to="/exams/create" className="btn-primary"><Plus size={16}/>Create Exam</Link>
+          <Link to="/exams/create" className="btn-primary w-fit"><Plus size={16}/>Create Exam</Link>
         )}
       </div>
 

@@ -10,6 +10,7 @@ import DashboardPage      from './pages/DashboardPage';
 import ExamsPage          from './pages/ExamsPage';
 import ExamCreatePage     from './pages/ExamCreatePage';
 import ExamDetailPage     from './pages/ExamDetailPage';
+import ExamReadyPage      from './pages/ExamReadyPage';
 import ExamTakePage       from './pages/ExamTakePage';
 import ExamRegisterPage   from './pages/ExamRegisterPage';
 import ProctorPage        from './pages/ProctorPage';
@@ -70,6 +71,10 @@ export default function App() {
         {/* Public open self-registration link (public, no login needed) — via shareable public_link_token */}
         <Route path="/public-exam/:token" element={<PublicExamRegisterPage/>}/>
         
+        {/* Camera/mic readiness check (no sidebar layout) — must come before Start Exam */}
+        <Route path="/exam/:id/ready"
+          element={<PrivateRoute roles={['student']}><ExamReadyPage/></PrivateRoute>}/>
+
         {/* Full-screen exam (no sidebar layout) */}
         <Route path="/exam/:sessionId/take"
           element={<PrivateRoute roles={['student']}><ExamTakePage/></PrivateRoute>}/>

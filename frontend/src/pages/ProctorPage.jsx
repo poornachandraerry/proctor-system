@@ -98,7 +98,7 @@ export default function ProctorPage() {
   );
 
   return (
-    <div className="p-6 max-w-7xl mx-auto h-full flex flex-col gap-4">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto h-full flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link to="/exams" className="p-2 rounded-xl hover:bg-surface-800 text-surface-400 hover:text-white transition-colors"><ArrowLeft size={20} /></Link>

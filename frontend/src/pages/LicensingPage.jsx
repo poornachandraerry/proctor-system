@@ -932,7 +932,7 @@ export default function LicensingPage() {
   useEffect(()=>{ loadBase(); },[loadBase]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-1">
           <div className="p-2.5 rounded-xl bg-gradient-to-br from-primary-500/20 to-purple-600/20 border border-primary-500/20">

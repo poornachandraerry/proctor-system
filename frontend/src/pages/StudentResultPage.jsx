@@ -43,7 +43,7 @@ export default function StudentResultPage() {
   );
 
   if (result?.resultsHidden) return (
-    <div className="p-6 max-w-lg mx-auto text-center py-24">
+    <div className="p-4 sm:p-6 max-w-lg mx-auto text-center py-24">
       <Clock size={48} className="text-amber-400 mx-auto mb-4"/>
       <h1 className="font-display text-2xl font-bold text-white mb-3">Results Not Yet Released</h1>
       <p className="text-surface-400">{result.message}</p>
@@ -60,7 +60,7 @@ export default function StudentResultPage() {
   const unanswered= answers.filter(a => a.is_correct === null).length;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link to="/dashboard" className="p-2 rounded-xl hover:bg-surface-800 text-surface-400 hover:text-white transition-colors">

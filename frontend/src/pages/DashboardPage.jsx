@@ -347,7 +347,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="font-display text-4xl font-bold text-white mb-1">
           {greeting()}, {user?.firstName}.

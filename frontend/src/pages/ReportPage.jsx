@@ -65,7 +65,7 @@ export default function ReportPage() {
   const riskBg    = { critical:'border-red-500/30 bg-red-500/5', high:'border-orange-500/30 bg-orange-500/5', medium:'border-yellow-500/30 bg-yellow-500/5', low:'border-emerald-500/30 bg-emerald-500/5' };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <Link to="/exams" className="p-2 rounded-xl hover:bg-surface-800 text-surface-400 hover:text-white transition-colors">
