@@ -23,7 +23,7 @@ router.get('/session/:sessionId', authorize('admin','org_admin','examiner'), asy
     `, [sessionId]);
     if (!session.rows.length) return res.status(404).json({ error: 'Session not found' });
     const answers = await query(`
-      SELECT a.*, q.question_text, q.question_type, q.marks, q.topic
+      SELECT a.*, q.question_text, q.question_type, q.marks, q.negative_marks, q.topic
       FROM answers a JOIN questions q ON a.question_id=q.id WHERE a.session_id=$1
     `, [sessionId]);
     const alerts = await query('SELECT * FROM proctoring_alerts WHERE session_id=$1 ORDER BY timestamp ASC', [sessionId]);
@@ -54,7 +54,7 @@ router.get('/session/:sessionId/excel', authorize('admin','org_admin','examiner'
     `, [sessionId]);
     if (!session.rows.length) return res.status(404).json({ error: 'Session not found' });
     const answers = await query(`
-      SELECT a.*, q.question_text, q.question_type, q.marks, q.topic
+      SELECT a.*, q.question_text, q.question_type, q.marks, q.negative_marks, q.topic
       FROM answers a JOIN questions q ON a.question_id=q.id WHERE a.session_id=$1
     `, [sessionId]);
     const alerts = await query('SELECT * FROM proctoring_alerts WHERE session_id=$1 ORDER BY timestamp ASC', [sessionId]);
@@ -162,7 +162,7 @@ router.get('/session/:sessionId/scorecard', async (req, res) => {
       return res.status(403).json({ error: 'Results have not been released yet by your examiner' });
 
     const answers = await query(`
-      SELECT a.*, q.question_text, q.question_type, q.marks, q.topic
+      SELECT a.*, q.question_text, q.question_type, q.marks, q.negative_marks, q.topic
       FROM answers a JOIN questions q ON a.question_id=q.id WHERE a.session_id=$1
     `, [sessionId]);
     const alerts = await query('SELECT * FROM proctoring_alerts WHERE session_id=$1', [sessionId]);
@@ -196,7 +196,7 @@ router.get('/my-result/:sessionId', authenticate, async (req, res) => {
     if (!s.show_results_to_student) return res.json({ resultsHidden: true, message: 'Results will be released by your examiner' });
 
     const answers = await query(`
-      SELECT a.*, q.question_text, q.question_type, q.marks, q.explanation
+      SELECT a.*, q.question_text, q.question_type, q.marks, q.negative_marks, q.explanation
       FROM answers a JOIN questions q ON a.question_id=q.id WHERE a.session_id=$1
     `, [sessionId]);
     const totalMarksObtained = answers.rows.reduce((sum, a) => sum + parseFloat(a.marks_obtained || 0), 0);

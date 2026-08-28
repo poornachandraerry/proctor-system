@@ -46,7 +46,7 @@ async function generateScoreCardPDF(reportData) {
 
       // ── Score Grid ────────────────────────────────────────
       const boxes = [
-        { label: 'Score',      value: `${Math.round(totalMarksObtained)} / ${session.total_marks}`, color: passed ? SUCCESS : DANGER },
+        { label: 'Score',      value: `${Number.isInteger(totalMarksObtained) ? totalMarksObtained : totalMarksObtained.toFixed(2)} / ${session.total_marks}`, color: passed ? SUCCESS : DANGER },
         { label: 'Percentage', value: `${scorePct}%`,                                               color: passed ? SUCCESS : DANGER },
         { label: 'Pass Mark',  value: `${session.pass_percentage}%`,                                color: MUTED  },
         { label: 'Risk Score', value: `${Math.round(session.risk_score || 0)} / 100`,               color: session.risk_score >= 50 ? DANGER : MUTED },

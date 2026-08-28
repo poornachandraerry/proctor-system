@@ -289,7 +289,7 @@ export default function ReportPage() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="section-title">Answer Summary</h3>
               <div className="text-sm text-surface-400">
-                <span className="text-white font-bold">{Math.round(totalMarksObtained)}</span> / {session.total_marks} marks
+                <span className="text-white font-bold">{Number.isInteger(totalMarksObtained) ? totalMarksObtained : totalMarksObtained.toFixed(2)}</span> / {session.total_marks} marks
               </div>
             </div>
             <div className="space-y-2">
@@ -314,8 +314,13 @@ export default function ReportPage() {
                     a.is_correct === true  ? 'text-emerald-400' :
                     a.is_correct === false ? 'text-red-400' : 'text-surface-300'
                   }`}>
-                    {a.marks_obtained || 0}/{a.marks}
+                    {a.marks_obtained != null ? a.marks_obtained : 0}/{a.marks}
                   </span>
+                  {a.is_correct === false && parseFloat(a.negative_marks) > 0 && (
+                    <span className="text-[10px] font-semibold text-red-400 bg-red-500/10 border border-red-500/20 rounded-full px-2 py-0.5 shrink-0">
+                      −{a.negative_marks} negative marking
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

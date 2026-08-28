@@ -196,9 +196,17 @@ async function submitSession(req, res) {
           const marksObtained = isCorrect
             ? parseFloat(q.marks)
             : -parseFloat(q.negative_marks || 0);
+          // NOTE: previously this clamped every negative value to 0 via
+          // Math.max(marksObtained, 0), which silently discarded negative
+          // marking entirely regardless of the negative_marks setting —
+          // a wrong answer always stored 0 penalty instead of the
+          // configured deduction. Store the real value; a genuinely
+          // negative overall total is normal and expected wherever
+          // negative marking is enabled (as in most competitive exams),
+          // so nothing sums this back to a floor of 0.
           await query(
             'UPDATE answers SET is_correct=$1, marks_obtained=$2 WHERE id=$3',
-            [isCorrect, Math.max(marksObtained, 0), ans.rows[0].id]
+            [isCorrect, marksObtained, ans.rows[0].id]
           );
         }
       }

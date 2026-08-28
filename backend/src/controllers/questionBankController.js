@@ -288,13 +288,18 @@ async function submitPracticeTest(req, res) {
       if (!userAnswer) { results[q.id] = { correct: false, marks: 0 }; continue; }
       const correct = JSON.stringify(userAnswer) === JSON.stringify(q.correct_answer);
       const marks   = correct ? parseFloat(q.marks) : -parseFloat(q.negative_marks || 0);
-      score += Math.max(marks, 0);
+      score += marks;
       results[q.id] = {
-        correct, marks: Math.max(marks, 0),
+        correct, marks,
         correctAnswer: q.correct_answer,
         explanation: q.explanation,
       };
     }
+    // Same fix as the main exam grading path: previously Math.max(marks, 0)
+    // discarded negative marking entirely, both per-question and in the
+    // running total. Now both reflect the real penalty — consistent with
+    // the main exam path, a negative overall score is possible and expected
+    // wherever negative marking is enabled.
 
     await query(`
       UPDATE practice_sessions

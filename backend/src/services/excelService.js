@@ -105,7 +105,7 @@ async function generateSessionReport(reportData) {
   addKV(10, 'Submitted At',   session.submitted_at ? new Date(session.submitted_at).toLocaleString() : '—');
 
   addSectionHeader(12, '  Score & Result');
-  addKV(13, 'Marks Obtained',  `${Math.round(totalMarksObtained)} / ${session.total_marks}`);
+  addKV(13, 'Marks Obtained',  `${Number.isInteger(totalMarksObtained) ? totalMarksObtained : totalMarksObtained.toFixed(2)} / ${session.total_marks}`);
   addKV(14, 'Percentage',      `${Math.round((totalMarksObtained / session.total_marks) * 100)}%`);
   addKV(15, 'Pass Mark',       `${session.pass_percentage}%`);
   addKV(16, 'Result',          passed ? 'PASSED ✓' : 'FAILED ✗', passed ? COLORS.success : COLORS.danger);
@@ -139,11 +139,12 @@ async function generateSessionReport(reportData) {
     { header: 'Topic',        key: 'topic',    width: 18 },
     { header: 'Time Spent',   key: 'time',     width: 12 },
     { header: 'Max Marks',    key: 'maxmarks', width: 11 },
+    { header: 'Negative Marking', key: 'negmarks', width: 15 },
     { header: 'Obtained',     key: 'obtained', width: 11 },
     { header: 'Result',       key: 'result',   width: 10 },
   ];
 
-  addTitleBlock(ansSheet, 'Answer Details', `${session.student_name} — ${session.exam_title}`, 1, 8);
+  addTitleBlock(ansSheet, 'Answer Details', `${session.student_name} — ${session.exam_title}`, 1, 9);
 
   // Header row
   const ansHeaderRow = ansSheet.getRow(5);
@@ -155,6 +156,7 @@ async function generateSessionReport(reportData) {
   ansHeaderRow.height = 28;
 
   answers.forEach((a, i) => {
+    const negMarks = parseFloat(a.negative_marks || 0);
     const row = ansSheet.addRow({
       num:      i + 1,
       question: a.question_text,
@@ -162,7 +164,8 @@ async function generateSessionReport(reportData) {
       topic:    a.topic || '—',
       time:     `${a.time_spent_seconds || 0}s`,
       maxmarks: a.marks,
-      obtained: a.marks_obtained || 0,
+      negmarks: negMarks > 0 ? `−${negMarks}` : '—',
+      obtained: a.marks_obtained != null ? a.marks_obtained : 0,
       result:   a.is_correct === true ? 'Correct' : a.is_correct === false ? 'Wrong' : 'Manual',
     });
     const isCorrect = a.is_correct === true;
@@ -174,15 +177,16 @@ async function generateSessionReport(reportData) {
         bg: bgColor,
         align: colNum <= 2 ? 'left' : 'center',
         wrap: colNum === 2,
-        bold: colNum === 7,
-        color: colNum === 8 ? (isCorrect ? COLORS.success : isWrong ? COLORS.danger : COLORS.warning) : '1E293B',
+        bold: colNum === 8,
+        color: colNum === 9 ? (isCorrect ? COLORS.success : isWrong ? COLORS.danger : COLORS.warning)
+             : colNum === 7 && isWrong && negMarks > 0 ? COLORS.danger : '1E293B',
       });
     });
     row.height = 22;
   });
 
   // Totals row
-  const totRow = ansSheet.addRow({ num: '', question: 'TOTAL', type: '', topic: '', time: '', maxmarks: session.total_marks, obtained: Math.round(totalMarksObtained), result: passed ? 'PASS' : 'FAIL' });
+  const totRow = ansSheet.addRow({ num: '', question: 'TOTAL', type: '', topic: '', time: '', maxmarks: session.total_marks, negmarks: '', obtained: Number.isInteger(totalMarksObtained) ? totalMarksObtained : totalMarksObtained.toFixed(2), result: passed ? 'PASS' : 'FAIL' });
   totRow.eachCell(cell => {
     cell.font = { bold: true, name: 'Calibri', size: 10, color: { argb: 'FF' + COLORS.white } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + (passed ? COLORS.success : COLORS.danger) } };
@@ -371,13 +375,14 @@ async function generateExamReport(examData, sessions) {
   hRow.height = 28;
 
   sessions.forEach((s, i) => {
-    const pct = Math.round((s.marks_obtained / examData.total_marks) * 100);
+    const marksObtained = parseFloat(s.marks_obtained || 0);
+    const pct = Math.round((marksObtained / examData.total_marks) * 100);
     const passed = pct >= examData.pass_percentage;
     const row = sheet.addRow({
       num: i + 1, name: s.student_name, email: s.email,
       started:   s.started_at  ? new Date(s.started_at).toLocaleString()  : '—',
       submitted: s.submitted_at ? new Date(s.submitted_at).toLocaleString() : 'Not submitted',
-      marks:     `${Math.round(s.marks_obtained||0)} / ${examData.total_marks}`,
+      marks:     `${Number.isInteger(marksObtained) ? marksObtained : marksObtained.toFixed(2)} / ${examData.total_marks}`,
       pct:       `${pct}%`,
       result:    passed ? 'PASS' : 'FAIL',
       risk:      Math.round(s.risk_score || 0),
