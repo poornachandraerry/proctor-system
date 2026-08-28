@@ -15,9 +15,11 @@
     "db:migrate:v6": "node src/config/migrate_v6.js",
     "db:migrate:v7": "node src/config/migrate_v7.js",
     "db:migrate:v8": "node src/config/migrate_v8.js",
-    "db:setup:full": "npm run db:migrate && npm run db:seed && npm run db:migrate:v2 && npm run db:seed:v2 && npm run db:migrate:v3 && npm run db:migrate:v4 && npm run db:migrate:v5 && npm run db:migrate:v6 && npm run db:migrate:v7 && npm run db:migrate:v8"
+    "db:migrate:v9": "node src/config/migrate_v9.js",
+    "db:setup:full": "npm run db:migrate && npm run db:seed && npm run db:migrate:v2 && npm run db:seed:v2 && npm run db:migrate:v3 && npm run db:migrate:v4 && npm run db:migrate:v5 && npm run db:migrate:v6 && npm run db:migrate:v7 && npm run db:migrate:v8 && npm run db:migrate:v9"
   },
   "dependencies": {
+    "razorpay": "^2.9.4",
     "@anthropic-ai/sdk": "^0.24.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
