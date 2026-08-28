@@ -92,7 +92,7 @@ export default function ExamsPage() {
       const url  = URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `ProctorAI_${examTitle.replace(/\s+/g,'_').slice(0,30)}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      link.download = `ProctorAIQ_${examTitle.replace(/\s+/g,'_').slice(0,30)}_${new Date().toISOString().slice(0,10)}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
       toast.success('Report downloaded!');

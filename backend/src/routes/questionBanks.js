@@ -10,7 +10,7 @@ router.get('/questions/template', authorize('admin','org_admin','examiner'), asy
   try {
     const buffer = await generateBankQuestionsTemplate();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="ProctorAI_QuestionBank_Upload_Template.xlsx"');
+    res.setHeader('Content-Disposition', 'attachment; filename="ProctorAIQ_QuestionBank_Upload_Template.xlsx"');
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate template' });

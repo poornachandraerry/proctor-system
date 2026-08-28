@@ -141,13 +141,21 @@ function useAudioCapture(sessionId, enabled, onContinuousSpeech) {
       source.connect(analyser);
       const data = new Uint8Array(analyser.frequencyBinCount);
 
-      const VOICE_THRESHOLD = 0.04;   // RMS above this counts as "talking"
-      const SUSTAIN_MS      = 9000;   // continuous talking longer than this fires a warning
-      const GRACE_MS        = 1800;   // short pauses within a sentence don't reset the streak
-      const COOLDOWN_MS     = 20000;  // don't re-fire again immediately after a warning
+      // Rolling-window "mostly talking" model rather than a strict unbroken
+      // streak. Real speech has natural pauses at word/sentence boundaries —
+      // a strict streak that resets on any brief gap essentially never
+      // fires during normal reading-aloud. Instead we sample every 200ms
+      // and ask: over the last WINDOW_MS, was the mic active TALK_RATIO of
+      // the time? That's tolerant of pauses while still catching someone
+      // who is basically talking continuously.
+      const VOICE_THRESHOLD = 0.025;  // RMS above this counts as "talking" this sample
+      const SAMPLE_MS   = 200;
+      const WINDOW_MS   = 7000;
+      const WINDOW_LEN  = Math.round(WINDOW_MS / SAMPLE_MS);
+      const TALK_RATIO  = 0.55;       // fraction of the window that must be "talking" to fire
+      const COOLDOWN_MS = 20000;      // don't re-fire again immediately after a warning
 
-      let talkingSinceMs = null;
-      let lastQuietAt = null;
+      const samples = [];
       let lastFiredAt = 0;
 
       const tick = () => {
@@ -158,32 +166,25 @@ function useAudioCapture(sessionId, enabled, onContinuousSpeech) {
           sum += v * v;
         }
         const rms = Math.sqrt(sum / data.length);
-        const now = Date.now();
+        samples.push(rms > VOICE_THRESHOLD ? 1 : 0);
+        if (samples.length > WINDOW_LEN) samples.shift();
 
-        if (rms > VOICE_THRESHOLD) {
-          lastQuietAt = null;
-          if (talkingSinceMs === null) talkingSinceMs = now;
-        } else {
-          if (talkingSinceMs !== null) {
-            if (lastQuietAt === null) lastQuietAt = now;
-            else if (now - lastQuietAt > GRACE_MS) talkingSinceMs = null; // real pause — reset
+        const now = Date.now();
+        if (samples.length === WINDOW_LEN) {
+          const ratio = samples.reduce((a, b) => a + b, 0) / WINDOW_LEN;
+          if (ratio >= TALK_RATIO && (now - lastFiredAt) > COOLDOWN_MS) {
+            lastFiredAt = now;
+            samples.length = 0; // start fresh after firing so we don't immediately re-trigger on the tail of the same window
+            onContinuousSpeech();
           }
         }
-
-        if (talkingSinceMs !== null && (now - talkingSinceMs) > SUSTAIN_MS && (now - lastFiredAt) > COOLDOWN_MS) {
-          lastFiredAt = now;
-          talkingSinceMs = now; // keep tracking in case it continues, but cooldown guards re-firing
-          onContinuousSpeech();
-        }
-
-        vadRaf.current = requestAnimationFrame(tick);
       };
-      tick();
+      vadRaf.current = setInterval(tick, SAMPLE_MS);
     } catch (e) { console.warn('Voice activity monitor unavailable:', e.message); }
   }, [onContinuousSpeech]);
 
   const stopVAD = useCallback(() => {
-    if (vadRaf.current) cancelAnimationFrame(vadRaf.current);
+    if (vadRaf.current) clearInterval(vadRaf.current);
     if (audioCtx.current) { audioCtx.current.close().catch(() => {}); audioCtx.current = null; }
   }, []);
 

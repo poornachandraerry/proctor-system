@@ -56,7 +56,7 @@ async function seed() {
         VALUES ($1,$2,$3,$4,$5,NOW() + INTERVAL '7 days',$6)
         ON CONFLICT DO NOTHING
       `, [orgId, 'Demo University — AI Proctoring Showcase', demoToken,
-          'Welcome to ProctorAI! This is a live demo with AI proctoring enabled. Explore all features with sample data.',
+          'Welcome to Proctor AIQ! This is a live demo with AI proctoring enabled. Explore all features with sample data.',
           'standard', adminId]);
       console.log(`✅ Demo sandbox created`);
       console.log(`   Demo URL token: ${demoToken}`);

@@ -104,7 +104,7 @@ async function startServer() {
     await connectRedis();
     
     httpServer.listen(PORT, () => {
-      logger.info(`🚀 ProctorAI server running on port ${PORT}`);
+      logger.info(`🚀 Proctor AIQ server running on port ${PORT}`);
       logger.info(`📡 Socket.io ready for real-time proctoring`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
     });

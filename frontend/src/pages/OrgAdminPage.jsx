@@ -173,7 +173,7 @@ export default function OrgAdminPage() {
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Users');
-    XLSX.writeFile(wb, 'ProctorAI_User_Upload_Template.xlsx');
+    XLSX.writeFile(wb, 'ProctorAIQ_User_Upload_Template.xlsx');
   };
 
   const filtered = users.filter(u =>

@@ -54,13 +54,13 @@ function addTitleBlock(sheet, title, subtitle, col = 1, endCol = 8) {
 // ── Question Bank Bulk Upload Template ──────────────────────
 async function generateBankQuestionsTemplate() {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'ProctorAI';
+  wb.creator = 'Proctor AIQ';
 
   const sheet     = wb.addWorksheet('Questions', { properties: { tabColor: { argb: 'FF4F46E5' } } });
   const instrSheet = wb.addWorksheet('Instructions');
 
   // ── Instructions sheet ──────────────────────────────────
-  addTitleBlock(instrSheet, 'ProctorAI — Question Bank Upload Template', 'Read all instructions before filling the Questions sheet', 1, 4);
+  addTitleBlock(instrSheet, 'Proctor AIQ — Question Bank Upload Template', 'Read all instructions before filling the Questions sheet', 1, 4);
   instrSheet.columns = [{ width: 5 }, { width: 30 }, { width: 50 }, { width: 5 }];
 
   const instructions = [
@@ -107,7 +107,7 @@ async function generateBankQuestionsTemplate() {
     { header: 'explanation',    key: 'explanation',     width: 35 },
   ];
 
-  addTitleBlock(sheet, 'ProctorAI — Question Bank Upload', 'Fill from row 6 onwards. Do not delete or rename column headers (row 5).', 1, 12);
+  addTitleBlock(sheet, 'Proctor AIQ — Question Bank Upload', 'Fill from row 6 onwards. Do not delete or rename column headers (row 5).', 1, 12);
 
   const headerRow = sheet.getRow(5);
   sheet.columns.forEach((col, i) => {

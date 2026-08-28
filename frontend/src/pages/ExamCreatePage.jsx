@@ -73,7 +73,7 @@ export default function ExamCreatePage() {
       const res = await api.get('/reports/questions/template', { responseType:'blob' });
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
-      a.href = url; a.download = 'ProctorAI_Question_Template.xlsx'; a.click();
+      a.href = url; a.download = 'ProctorAIQ_Question_Template.xlsx'; a.click();
       URL.revokeObjectURL(url);
       toast.success('Template downloaded!');
     } catch { toast.error('Download failed'); }

@@ -67,7 +67,7 @@ async function sendEmail({ to, subject, html, text }) {
     };
   }
 
-  const fromName  = process.env.SMTP_FROM_NAME || 'ProctorAI';
+  const fromName  = process.env.SMTP_FROM_NAME || 'Proctor AIQ';
   const fromEmail = process.env.SMTP_USER;
 
   try {
@@ -106,9 +106,9 @@ async function testEmailConfig(testRecipient) {
   if (testRecipient) {
     const result = await sendEmail({
       to: testRecipient,
-      subject: 'ProctorAI — Test Email',
-      html: '<p>This is a test email from ProctorAI to confirm your SMTP configuration is working correctly.</p>',
-      text: 'This is a test email from ProctorAI to confirm your SMTP configuration is working correctly.',
+      subject: 'Proctor AIQ — Test Email',
+      html: '<p>This is a test email from Proctor AIQ to confirm your SMTP configuration is working correctly.</p>',
+      text: 'This is a test email from Proctor AIQ to confirm your SMTP configuration is working correctly.',
     });
     return {
       ok: result.sent,
@@ -124,7 +124,7 @@ async function testEmailConfig(testRecipient) {
 function examInviteTemplate({ studentName, examTitle, examDate, examDuration, registerLink, orgName, instructions }) {
   const dateStr = examDate ? new Date(examDate).toLocaleString('en-IN', { dateStyle:'full', timeStyle:'short' }) : 'To be announced';
   return {
-    subject: `You're invited: ${examTitle} — ${orgName || 'ProctorAI'}`,
+    subject: `You're invited: ${examTitle} — ${orgName || 'Proctor AIQ'}`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -134,7 +134,7 @@ function examInviteTemplate({ studentName, examTitle, examDate, examDuration, re
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#1e293b;border-radius:16px;overflow:hidden;border:1px solid #334155">
         <tr><td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px 40px;text-align:center">
-          <div style="font-size:28px;font-weight:800;color:#fff;letter-spacing:-0.5px">ProctorAI</div>
+          <div style="font-size:28px;font-weight:800;color:#fff;letter-spacing:-0.5px">Proctor &nbsp;<span style="color:#c4b5fd">AIQ</span></div>
           <div style="color:#c4b5fd;font-size:13px;margin-top:4px">Enterprise Examination Platform</div>
         </td></tr>
         <tr><td style="padding:36px 40px">
@@ -148,7 +148,7 @@ function examInviteTemplate({ studentName, examTitle, examDate, examDuration, re
               <tr><td style="padding:6px 0;color:#64748b;font-size:13px">⏱️ Duration</td>
                   <td style="padding:6px 0;color:#e2e8f0;font-size:13px;font-weight:600">${examDuration || 60} minutes</td></tr>
               <tr><td style="padding:6px 0;color:#64748b;font-size:13px">🏢 Organisation</td>
-                  <td style="padding:6px 0;color:#e2e8f0;font-size:13px;font-weight:600">${orgName || 'ProctorAI'}</td></tr>
+                  <td style="padding:6px 0;color:#e2e8f0;font-size:13px;font-weight:600">${orgName || 'Proctor AIQ'}</td></tr>
             </table>
           </div>
           ${instructions ? `<div style="background:#1e3a5f;border-radius:8px;padding:16px;margin:16px 0;color:#93c5fd;font-size:13px;line-height:1.6"><strong>📋 Instructions:</strong><br/>${instructions}</div>` : ''}
@@ -172,14 +172,14 @@ function examInviteTemplate({ studentName, examTitle, examDate, examDuration, re
           </p>
         </td></tr>
         <tr><td style="background:#0f172a;padding:20px 40px;text-align:center;border-top:1px solid #1e293b">
-          <div style="color:#475569;font-size:12px">Powered by <strong style="color:#6366f1">ProctorAI</strong> — Enterprise Examination Platform</div>
+          <div style="color:#475569;font-size:12px">Powered by <strong style="color:#6366f1">Proctor AIQ</strong> — Enterprise Examination Platform</div>
         </td></tr>
       </table>
     </td></tr>
   </table>
 </body>
 </html>`,
-    text: `Dear ${studentName},\n\nYou are invited to: ${examTitle}\nDate: ${dateStr}\nDuration: ${examDuration} minutes\n\nRegister here: ${registerLink}\n\nProctorAI`
+    text: `Dear ${studentName},\n\nYou are invited to: ${examTitle}\nDate: ${dateStr}\nDuration: ${examDuration} minutes\n\nRegister here: ${registerLink}\n\nProctor AIQ`
   };
 }
 
@@ -193,7 +193,7 @@ function examReminderTemplate({ studentName, examTitle, examDate, examLink }) {
       <p>Your exam <strong>${examTitle}</strong> is scheduled for <strong>${dateStr}</strong>.</p>
       <p>Make sure your webcam and internet are ready.</p>
       <a href="${examLink}" style="background:#4f46e5;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:16px;font-weight:700">Go to Exam →</a>
-      <p style="color:#64748b;font-size:12px;margin-top:24px">ProctorAI — Enterprise Examination Platform</p>
+      <p style="color:#64748b;font-size:12px;margin-top:24px">Proctor AIQ — Enterprise Examination Platform</p>
     </div>`,
     text: `Hi ${studentName}, your exam "${examTitle}" is scheduled for ${dateStr}. Link: ${examLink}`
   };
@@ -211,7 +211,7 @@ function scoreCardTemplate({ studentName, examTitle, score, totalMarks, percenta
         <div style="font-size:24px;color:#fff;margin-top:8px">${score} / ${totalMarks} marks</div>
         <div style="color:#94a3b8">${percentage}%</div>
       </div>
-      <p style="color:#64748b;font-size:12px">Result date: ${date} | ProctorAI</p>
+      <p style="color:#64748b;font-size:12px">Result date: ${date} | Proctor AIQ</p>
     </div>`,
     text: `Hi ${studentName}, your result for "${examTitle}": ${score}/${totalMarks} (${percentage}%) — ${passed?'PASSED':'FAILED'}`
   };

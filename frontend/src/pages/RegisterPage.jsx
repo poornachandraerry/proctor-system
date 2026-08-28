@@ -28,7 +28,7 @@ export default function RegisterPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 mb-4 shadow-2xl shadow-primary-500/30">
             <Shield size={28} className="text-white" />
           </div>
-          <h1 className="font-display text-3xl font-bold text-white mb-2">ProctorAI</h1>
+          <h1 className="font-display text-3xl font-bold text-white mb-2">Proctor <span className="text-primary-400">AIQ</span></h1>
           <p className="text-surface-400 text-sm">Create your account</p>
         </div>
         <div className="glass rounded-2xl p-8 border border-surface-700/50">

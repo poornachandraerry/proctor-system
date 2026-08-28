@@ -36,6 +36,26 @@ export default function ReportPage() {
     } catch { toast.error('Failed to flag clip'); }
   };
 
+  // The stored file itself is just audio-<uuid>.webm with nothing identifying
+  // whose recording it is — fine while browsing inside the app (the page
+  // header shows the candidate), but meaningless the moment a clip is
+  // downloaded or shared outside it. Give downloads a real filename instead.
+  const downloadClip = async (clip, idx) => {
+    try {
+      const res = await fetch(fileUrl(clip.file_path));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeName = (report.session.student_name || 'candidate').replace(/\s+/g, '_');
+      const safeExam = (report.session.exam_title || 'exam').replace(/\s+/g, '_');
+      const ts = new Date(clip.captured_at).toISOString().replace(/[:.]/g, '-');
+      link.href = url;
+      link.download = `ProctorAIQ_Audio_${safeName}_${safeExam}_clip${idx + 1}_${ts}.webm`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Failed to download clip'); }
+  };
+
   const downloadExcel = async () => {
     setDownloading(true);
     try {
@@ -43,7 +63,7 @@ export default function ReportPage() {
       const url  = URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `ProctorAI_Report_${report.session.student_name?.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      link.download = `ProctorAIQ_Report_${report.session.student_name?.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
       toast.success('Excel report downloaded!');
@@ -204,7 +224,8 @@ export default function ReportPage() {
 
         {/* Audio recordings */}
         <div className="card">
-          <h3 className="section-title mb-4 flex items-center gap-2"><Volume2 size={16}/>Audio Recordings ({audioClips.length})</h3>
+          <h3 className="section-title mb-1 flex items-center gap-2"><Volume2 size={16}/>Audio Recordings ({audioClips.length})</h3>
+          <p className="text-xs text-surface-500 mb-4">Recorded from {session.student_name} · {session.exam_title}</p>
           {audioClips.length === 0 ? (
             <div className="text-center py-8">
               <Volume2 size={28} className="text-surface-600 mx-auto mb-2" />
@@ -212,17 +233,26 @@ export default function ReportPage() {
             </div>
           ) : (
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-              {audioClips.map(c => (
+              {audioClips.map((c, idx) => (
                 <div key={c.id} className={`p-3 rounded-xl border ${c.flagged ? 'border-red-500/30 bg-red-500/5' : 'border-surface-700 bg-surface-800/50'}`}>
                   <div className="flex items-center justify-between mb-2 text-xs">
-                    <span className="text-surface-400">{new Date(c.captured_at).toLocaleTimeString()} · {c.duration_s || 0}s</span>
-                    <button
-                      onClick={() => !c.flagged && flagClip(c.id)}
-                      disabled={c.flagged}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${c.flagged ? 'text-red-400 bg-red-500/10' : 'text-surface-400 hover:text-red-400'}`}
-                    >
-                      <Flag size={11}/>{c.flagged ? 'Flagged' : 'Flag'}
-                    </button>
+                    <span className="text-surface-400">Clip {idx + 1} · {new Date(c.captured_at).toLocaleTimeString()} · {c.duration_s || 0}s</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => downloadClip(c, idx)}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-surface-400 hover:text-primary-400"
+                        title="Download with candidate name in filename"
+                      >
+                        <Download size={11}/>
+                      </button>
+                      <button
+                        onClick={() => !c.flagged && flagClip(c.id)}
+                        disabled={c.flagged}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${c.flagged ? 'text-red-400 bg-red-500/10' : 'text-surface-400 hover:text-red-400'}`}
+                      >
+                        <Flag size={11}/>{c.flagged ? 'Flagged' : 'Flag'}
+                      </button>
+                    </div>
                   </div>
                   <audio controls src={fileUrl(c.file_path)} className="w-full h-9" />
                 </div>

@@ -738,7 +738,7 @@ function SandboxesTab({ orgs }) {
       <Modal open={showCreate} onClose={()=>setShowCreate(false)} title="Create Demo Sandbox" wide>
         <form onSubmit={handleCreate} className="space-y-4">
           <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-xs text-blue-300">
-            💡 A shareable link will be created for your prospect to experience ProctorAI without signing up. The link auto-expires.
+            💡 A shareable link will be created for your prospect to experience Proctor AIQ without signing up. The link auto-expires.
           </div>
           <div><label className="label text-xs">Organisation *</label>
             <select value={form.orgId} onChange={e=>setForm({...form,orgId:e.target.value})} className="input" required>
@@ -747,7 +747,7 @@ function SandboxesTab({ orgs }) {
             </select>
           </div>
           <div><label className="label text-xs">Demo Name *</label><input value={form.demoName} onChange={e=>setForm({...form,demoName:e.target.value})} className="input" placeholder="Apex Coaching — AI Proctoring Demo" required/></div>
-          <div><label className="label text-xs">Welcome Message</label><textarea value={form.welcomeMessage} onChange={e=>setForm({...form,welcomeMessage:e.target.value})} className="input resize-none h-20" placeholder="Welcome to ProctorAI! This is a live demonstration..."/></div>
+          <div><label className="label text-xs">Welcome Message</label><textarea value={form.welcomeMessage} onChange={e=>setForm({...form,welcomeMessage:e.target.value})} className="input resize-none h-20" placeholder="Welcome to Proctor AIQ! This is a live demonstration..."/></div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="label text-xs">Preset</label>
               <select value={form.presetType} onChange={e=>setForm({...form,presetType:e.target.value})} className="input">

@@ -76,7 +76,7 @@ export default function ExamRegisterPage() {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 mb-4 shadow-2xl shadow-primary-500/25">
             <Shield size={24} className="text-white"/>
           </div>
-          <h1 className="font-display text-3xl font-bold text-white">ProctorAI</h1>
+          <h1 className="font-display text-3xl font-bold text-white">Proctor <span className="text-primary-400">AIQ</span></h1>
           <p className="text-surface-400 text-sm mt-1">Exam Registration</p>
         </div>
 

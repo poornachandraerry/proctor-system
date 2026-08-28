@@ -65,7 +65,7 @@ router.get('/session/:sessionId/excel', authorize('admin','org_admin','examiner'
       totalMarksObtained,
       passed: totalMarksObtained >= (s.total_marks * s.pass_percentage / 100)
     });
-    const filename = `ProctorAI_Report_${s.student_name.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
+    const filename = `ProctorAIQ_Report_${s.student_name.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
@@ -113,7 +113,7 @@ router.get('/exam/:examId/excel', authorize('admin','org_admin','examiner'), asy
       WHERE es.exam_id=$1 ORDER BY es.created_at ASC
     `, [examId]);
     const buffer = await generateExamReport(exam.rows[0], sessions.rows);
-    const filename = `ProctorAI_Exam_${exam.rows[0].title.replace(/\s+/g,'_').slice(0,30)}_${new Date().toISOString().slice(0,10)}.xlsx`;
+    const filename = `ProctorAIQ_Exam_${exam.rows[0].title.replace(/\s+/g,'_').slice(0,30)}_${new Date().toISOString().slice(0,10)}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
@@ -128,7 +128,7 @@ router.get('/questions/template', authorize('admin','examiner'), async (req, res
   try {
     const buffer = await generateQuestionsTemplate();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="ProctorAI_Question_Upload_Template.xlsx"');
+    res.setHeader('Content-Disposition', 'attachment; filename="ProctorAIQ_Question_Upload_Template.xlsx"');
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate template' });

@@ -21,7 +21,7 @@ export default function AuthLayout({ children }) {
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
-            <span className="text-white text-xl font-bold tracking-tight">ProctorAI</span>
+            <span className="text-white text-xl font-bold tracking-tight">Proctor <span className="text-brand-300">AIQ</span></span>
           </div>
 
           <motion.div
@@ -78,7 +78,7 @@ export default function AuthLayout({ children }) {
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
-            <span className="text-surface-900 text-lg font-bold">ProctorAI</span>
+            <span className="text-surface-900 text-lg font-bold">Proctor <span className="text-brand-600">AIQ</span></span>
           </div>
           {children}
         </motion.div>

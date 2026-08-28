@@ -13,19 +13,19 @@ async function seed() {
     const adminResult = await pool.query(
       `INSERT INTO users (email, password_hash, first_name, last_name, role, organization, is_email_verified)
        VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT (email) DO UPDATE SET password_hash=$2 RETURNING id`,
-      ['admin@proctorAI.com', adminHash, 'System', 'Admin', 'admin', 'ProctorAI']
+      ['admin@proctorAI.com', adminHash, 'System', 'Admin', 'admin', 'Proctor AIQ']
     );
 
     const examinerResult = await pool.query(
       `INSERT INTO users (email, password_hash, first_name, last_name, role, organization, is_email_verified)
        VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT (email) DO UPDATE SET password_hash=$2 RETURNING id`,
-      ['examiner@proctorAI.com', examinerHash, 'John', 'Examiner', 'examiner', 'ProctorAI']
+      ['examiner@proctorAI.com', examinerHash, 'John', 'Examiner', 'examiner', 'Proctor AIQ']
     );
 
     const studentResult = await pool.query(
       `INSERT INTO users (email, password_hash, first_name, last_name, role, organization, is_email_verified)
        VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT (email) DO UPDATE SET password_hash=$2 RETURNING id`,
-      ['student@proctorAI.com', studentHash, 'Jane', 'Student', 'student', 'ProctorAI']
+      ['student@proctorAI.com', studentHash, 'Jane', 'Student', 'student', 'Proctor AIQ']
     );
 
     const examinerId = examinerResult.rows[0].id;

@@ -26,7 +26,7 @@ async function generateScoreCardPDF(reportData) {
 
       // ── Header Banner ─────────────────────────────────────
       doc.rect(0, 0, 595, 110).fill(PRIMARY);
-      doc.fill(WHITE).font('Helvetica-Bold').fontSize(26).text('ProctorAI', 50, 28);
+      doc.fill(WHITE).font('Helvetica-Bold').fontSize(26).text('Proctor ', 50, 28, { continued: true }).fill('#C4B5FD').text('AIQ');
       doc.fill('#C4B5FD').font('Helvetica').fontSize(11).text('Enterprise Examination Platform', 50, 58);
       doc.fill(WHITE).font('Helvetica-Bold').fontSize(13).text('SCORE CARD', 420, 38);
       doc.fill('#C4B5FD').font('Helvetica').fontSize(9).text(`Generated: ${new Date().toLocaleString('en-IN')}`, 390, 58);
@@ -134,7 +134,7 @@ async function generateScoreCardPDF(reportData) {
       // ── Footer ────────────────────────────────────────────
       doc.rect(0, 800, 595, 42).fill(SURFACE);
       doc.fill(MUTED).font('Helvetica').fontSize(8).text(
-        `ProctorAI Score Card  |  ${session.exam_title}  |  ${session.student_name}  |  Risk: ${riskLevel}`,
+        `Proctor AIQ Score Card  |  ${session.exam_title}  |  ${session.student_name}  |  Risk: ${riskLevel}`,
         50, 815, { width: 495, align: 'center' }
       );
 

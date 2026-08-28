@@ -64,7 +64,7 @@ function addTitleBlock(sheet, title, subtitle, col = 1, endCol = 8) {
 async function generateSessionReport(reportData) {
   const { session, answers, alerts, totalMarksObtained, passed } = reportData;
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'ProctorAI';
+  wb.creator = 'Proctor AIQ';
   wb.created = new Date();
 
   // ── Sheet 1: Summary ───────────────────────────────────────
@@ -73,7 +73,7 @@ async function generateSessionReport(reportData) {
     { width: 3 }, { width: 28 }, { width: 30 }, { width: 3 }
   ];
 
-  addTitleBlock(summarySheet, 'ProctorAI — Exam Session Report', `Generated on ${new Date().toLocaleString()}`, 1, 3);
+  addTitleBlock(summarySheet, 'Proctor AIQ — Exam Session Report', `Generated on ${new Date().toLocaleString()}`, 1, 3);
 
   const addSectionHeader = (row, text) => {
     summarySheet.mergeCells(row, 1, row, 3);
@@ -242,13 +242,13 @@ async function generateSessionReport(reportData) {
 // ── Bulk Questions Template ─────────────────────────────────
 async function generateQuestionsTemplate() {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'ProctorAI';
+  wb.creator = 'Proctor AIQ';
 
   const sheet = wb.addWorksheet('Questions', { properties: { tabColor: { argb: 'FF4F46E5' } } });
   const instrSheet = wb.addWorksheet('Instructions');
 
   // Instructions sheet
-  addTitleBlock(instrSheet, 'ProctorAI — Bulk Question Upload Template', 'Read all instructions before filling the Questions sheet', 1, 4);
+  addTitleBlock(instrSheet, 'Proctor AIQ — Bulk Question Upload Template', 'Read all instructions before filling the Questions sheet', 1, 4);
   instrSheet.columns = [{ width: 5 }, { width: 30 }, { width: 50 }, { width: 5 }];
 
   const instructions = [
@@ -296,7 +296,7 @@ async function generateQuestionsTemplate() {
     { header: 'explanation',     key: 'explanation',     width: 35 },
   ];
 
-  addTitleBlock(sheet, 'ProctorAI — Question Upload Template', 'Fill from row 6 onwards. Do not delete or rename column headers (row 5).', 1, 12);
+  addTitleBlock(sheet, 'Proctor AIQ — Question Upload Template', 'Fill from row 6 onwards. Do not delete or rename column headers (row 5).', 1, 12);
 
   const headerRow = sheet.getRow(5);
   sheet.columns.forEach((col, i) => {
@@ -346,7 +346,7 @@ async function generateQuestionsTemplate() {
 // ── Exam Overview Report ────────────────────────────────────
 async function generateExamReport(examData, sessions) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'ProctorAI';
+  wb.creator = 'Proctor AIQ';
 
   const sheet = wb.addWorksheet('Exam Overview', { properties: { tabColor: { argb: 'FF4F46E5' } } });
   sheet.columns = [
@@ -364,7 +364,7 @@ async function generateExamReport(examData, sessions) {
     { header: 'Flagged',      key: 'flagged',  width: 9  },
   ];
 
-  addTitleBlock(sheet, `ProctorAI — Exam Report: ${examData.title}`, `Generated ${new Date().toLocaleString()} · ${sessions.length} participants`, 1, 12);
+  addTitleBlock(sheet, `Proctor AIQ — Exam Report: ${examData.title}`, `Generated ${new Date().toLocaleString()} · ${sessions.length} participants`, 1, 12);
 
   const hRow = sheet.getRow(5);
   sheet.columns.forEach((col, i) => { const c = hRow.getCell(i+1); c.value = col.header; applyHeaderStyle(c); });

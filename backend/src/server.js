@@ -123,7 +123,7 @@ async function start() {
     await connectDB();
     await connectRedis();
     server.listen(PORT, () => {
-      logger.info(`🚀 ProctorAI running on http://localhost:${PORT}`);
+      logger.info(`🚀 Proctor AIQ running on http://localhost:${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (err) {

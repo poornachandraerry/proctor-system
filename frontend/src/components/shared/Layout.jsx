@@ -69,7 +69,7 @@ export default function Layout() {
               exit={{ opacity:0 }}
               transition={{ duration:0.2 }}
             >
-              <div className="font-display font-bold text-white text-lg leading-none">ProctorAI</div>
+              <div className="font-display font-bold text-white text-lg leading-none">Proctor <span className="text-primary-400">AIQ</span></div>
               <div className="text-xs text-surface-400 font-medium mt-0.5 capitalize">
                 {user?.role === 'org_admin' ? 'Organisation Admin' : user?.role}
               </div>
@@ -224,7 +224,7 @@ export default function Layout() {
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center shrink-0">
             <Shield size={14} className="text-white"/>
           </div>
-          <span className="font-display font-bold text-white text-base">ProctorAI</span>
+          <span className="font-display font-bold text-white text-base">Proctor <span className="text-primary-400">AIQ</span></span>
         </div>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-surface-950 bg-dot">

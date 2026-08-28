@@ -17,7 +17,7 @@ router.get('/test', async (req, res) => {
   try {
     await sendEmail({
       to: process.env.SMTP_USER,
-      subject: 'ProctorAI SMTP Test',
+      subject: 'Proctor AIQ SMTP Test',
       text: 'SMTP configuration is working correctly.',
       html: '<h2>SMTP configuration is working correctly.</h2>'
     });

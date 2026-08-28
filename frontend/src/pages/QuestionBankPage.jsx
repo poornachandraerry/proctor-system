@@ -179,7 +179,7 @@ export default function QuestionBankPage() {
       const response = await api.get('/question-banks/questions/template', { responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([response.data]));
       const a = document.createElement('a');
-      a.href = url; a.download = 'ProctorAI_QuestionBank_Upload_Template.xlsx'; a.click();
+      a.href = url; a.download = 'ProctorAIQ_QuestionBank_Upload_Template.xlsx'; a.click();
       URL.revokeObjectURL(url);
       toast.success('Template downloaded!');
     } catch { toast.error('Failed to download template'); }
