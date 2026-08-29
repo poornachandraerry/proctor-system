@@ -14,6 +14,26 @@ async function analyzeFrame(req, res) {
       if (session.rows.length) {
         const { exam_id, user_id } = session.rows[0];
 
+        // If the AI couldn't actually be checked (missing key, API error,
+        // unparseable response), don't stay silent about it — one alert
+        // per session, so an examiner reviewing the report can tell "AI
+        // said this was fine" apart from "AI monitoring wasn't working at
+        // all for this candidate" instead of both looking identical.
+        if (analysis.ai_unavailable) {
+          const already = await query(
+            "SELECT id FROM proctoring_alerts WHERE session_id=$1 AND alert_type='ai_monitoring_unavailable'",
+            [sessionId]
+          );
+          if (!already.rows.length) {
+            await query(
+              'INSERT INTO proctoring_alerts (session_id, user_id, exam_id, alert_type, severity, description) VALUES ($1,$2,$3,$4,$5,$6)',
+              [sessionId, user_id, exam_id, 'ai_monitoring_unavailable', 'medium',
+               'AI-based face/gaze/object detection was unavailable during this session (see server logs) — only heuristic and event-based checks (camera-blocked, tab-switch, fullscreen) applied.']
+            );
+          }
+          return res.json(analysis);
+        }
+
         // Act directly on the structured fields the model returns — don't
         // rely solely on its freeform `flags` list, which may describe the
         // same issue in inconsistent wording (or omit it) even when the

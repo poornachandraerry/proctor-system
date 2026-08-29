@@ -537,7 +537,8 @@ export default function ExamTakePage() {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     let consecutiveBlocked = 0;
-    let baseline = null;     // rolling "normal" brightness, adapts to room lighting
+    let baseline = null;         // rolling "normal" brightness, adapts to room lighting
+    let varianceBaseline = null; // rolling "normal" texture/detail level (a face has detail; a palm or paper filling the frame doesn't)
     let isCurrentlyBlocked = false;
 
     const checkFrame = async () => {
@@ -572,14 +573,28 @@ export default function ExamTakePage() {
           isRelativeDrop = mean < baseline * 0.45 && variance < 25;
         }
 
-        const blocked = isDark || isFlatUniform || isRelativeDrop;
+        // A hand, palm, or sheet of paper held close to the lens is often
+        // brightly lit — so none of the brightness checks above catch it.
+        // What it always does is collapse image detail: a face has texture
+        // (eyes, hair, features) that keeps variance moderate-to-high; a
+        // close, flat object filling the frame flattens that texture out
+        // almost completely, regardless of how bright the room is. We
+        // track a rolling "normal" variance and flag a sudden collapse
+        // relative to it.
+        let isTextureCollapse = false;
+        if (varianceBaseline !== null && varianceBaseline > 40) {
+          isTextureCollapse = variance < varianceBaseline * 0.12;
+        }
+
+        const blocked = isDark || isFlatUniform || isRelativeDrop || isTextureCollapse;
 
         if (blocked) {
           consecutiveBlocked++;
         } else {
           consecutiveBlocked = 0;
-          // Only learn the baseline from confirmed-clear frames.
+          // Only learn baselines from confirmed-clear frames.
           baseline = baseline === null ? mean : baseline * 0.9 + mean * 0.1;
+          varianceBaseline = varianceBaseline === null ? variance : varianceBaseline * 0.9 + variance * 0.1;
           if (isCurrentlyBlocked) {
             isCurrentlyBlocked = false;
             setCameraBlocked(false);
@@ -587,7 +602,7 @@ export default function ExamTakePage() {
         }
 
         // Fire on first confirmed blocked read for a near-instant warning —
-        // the frame is already sampled every 1.5s so noise is minimal.
+        // the frame is sampled every second, so noise is minimal.
         if (consecutiveBlocked >= 1 && !isCurrentlyBlocked) {
           isCurrentlyBlocked = true;
           setCameraBlocked(true);
@@ -616,7 +631,10 @@ export default function ExamTakePage() {
       }
     };
 
-    camCheckTimer.current = setInterval(checkFrame, 1500);
+    // Tightened from 1.5s to 1s — this check is a cheap local canvas read
+    // (no network call), so checking every second costs nothing and
+    // catches brief occlusions faster.
+    camCheckTimer.current = setInterval(checkFrame, 1000);
     return () => clearInterval(camCheckTimer.current);
   }, [session, sessionId, submitted]);
 
@@ -626,7 +644,7 @@ export default function ExamTakePage() {
   // max_warnings) instead of only being logged silently for later review.
   useEffect(() => {
     if (!session?.proctoring_settings?.ai_analysis || submitted) return;
-    const intervalMs = (session.proctoring_settings?.ai_analysis_interval_seconds || 10) * 1000;
+    const intervalMs = (session.proctoring_settings?.ai_analysis_interval_seconds || 5) * 1000;
     aiTimer.current = setInterval(async () => {
       if (!webcamRef.current || submitted) return;
       try {

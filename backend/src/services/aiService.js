@@ -13,11 +13,20 @@ function getClient() {
 async function analyzeWebcamFrame(imageBase64) {
   const client = getClient();
   if (!client) {
-    return { safe: true, flags: [], confidence: 0.5, summary: 'AI not configured', face_detected: true, multiple_faces: false, suspicious_objects: false, looking_away: false };
+    // Rate-limited so a misconfigured key doesn't flood the logs — but
+    // logged at all, because silently returning "everything is fine" for
+    // every single frame with zero trace anywhere is how an entire exam's
+    // AI monitoring can quietly do nothing for hours without anyone
+    // noticing until it's too late to matter.
+    if (!getClient._warnedMissingKey || Date.now() - getClient._warnedMissingKey > 5 * 60 * 1000) {
+      logger.warn('AI webcam analysis is disabled: ANTHROPIC_API_KEY is not set (or still the placeholder value). Face/gaze/multi-person detection will not run for any exam until this is fixed.');
+      getClient._warnedMissingKey = Date.now();
+    }
+    return { safe: true, flags: [], confidence: 0.5, summary: 'AI not configured', face_detected: true, multiple_faces: false, suspicious_objects: false, looking_away: false, ai_unavailable: true };
   }
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 400,
       messages: [{
         role: 'user',
@@ -40,10 +49,17 @@ Respond ONLY with this JSON (no extra text):
     const text = response.content[0].text.trim();
     const match = text.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]);
-    return { safe: true, flags: [], confidence: 0.5, summary: 'Parse error', face_detected: true, multiple_faces: false, suspicious_objects: false, looking_away: false };
+    logger.warn('AI webcam analysis: response did not contain parseable JSON, treating frame as unavailable rather than assuming safe:', text.slice(0, 200));
+    return { safe: true, flags: [], confidence: 0.5, summary: 'Parse error', face_detected: true, multiple_faces: false, suspicious_objects: false, looking_away: false, ai_unavailable: true };
   } catch (err) {
-    logger.error('AI frame analysis error:', err.message);
-    return { safe: true, flags: [], confidence: 0.5, summary: 'AI error', face_detected: true, multiple_faces: false, suspicious_objects: false, looking_away: false };
+    // Same reasoning as above: log it so a broken key, deprecated model, or
+    // rate limit shows up somewhere, instead of every single call for the
+    // entire exam silently reporting "all clear".
+    if (!analyzeWebcamFrame._lastErrorLogAt || Date.now() - analyzeWebcamFrame._lastErrorLogAt > 5 * 60 * 1000) {
+      logger.error('AI frame analysis error (further errors suppressed for 5 min):', err.message);
+      analyzeWebcamFrame._lastErrorLogAt = Date.now();
+    }
+    return { safe: true, flags: [], confidence: 0.5, summary: 'AI error', face_detected: true, multiple_faces: false, suspicious_objects: false, looking_away: false, ai_unavailable: true };
   }
 }
 
@@ -68,7 +84,7 @@ In 2-3 professional sentences, describe the integrity risk. End with: "Risk Leve
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 300,
       messages: [{ role: 'user', content: prompt }]
     });
@@ -84,7 +100,7 @@ async function generateExamQuestions({ topic, difficulty, questionType, count })
   if (!client) throw new Error('Anthropic API key not configured. Add ANTHROPIC_API_KEY to backend/.env');
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 3000,
     messages: [{
       role: 'user',
