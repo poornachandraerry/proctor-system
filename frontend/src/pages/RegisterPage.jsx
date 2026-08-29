@@ -1,15 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Shield, Eye, EyeOff, Lock, Mail, User, ArrowRight, Building } from 'lucide-react';
+import { Shield, Eye, EyeOff, Lock, Mail, User, ArrowRight, Building, GraduationCap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
+import api from '../utils/api';
 
 export default function RegisterPage() {
-  const [form, setForm] = useState({ email: '', password: '', firstName: '', lastName: '', role: 'student', organization: '' });
+  const [form, setForm] = useState({ email: '', password: '', firstName: '', lastName: '', role: 'student', organization: '', categoryId: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const [categories, setCategories] = useState([]);
   const { register, isLoading } = useAuthStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    api.get('/auth/categories').then(({ data }) => setCategories(data || [])).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -80,6 +86,18 @@ export default function RegisterPage() {
                 </div>
               </div>
             </div>
+            {form.role === 'student' && categories.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-surface-300 mb-1.5">What are you preparing for? (optional)</label>
+                <div className="relative">
+                  <GraduationCap size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" />
+                  <select value={form.categoryId} onChange={e => setForm({ ...form, categoryId: e.target.value })} className="input pl-9">
+                    <option value="">Not sure yet / General</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
             <button type="submit" disabled={isLoading} className="btn-primary w-full justify-center py-3 text-base font-semibold mt-2">
               {isLoading ? (
                 <span className="flex items-center gap-2">

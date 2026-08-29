@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, FileText, Users, AlertTriangle,
-  Shield, LogOut, Menu, X, Key, Building2, Database
+  Shield, LogOut, Menu, X, Key, Building2, Database, GraduationCap
 } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
@@ -13,6 +13,7 @@ const NAV = {
     { to:'/dashboard',      icon:LayoutDashboard, label:'Dashboard'      },
     { to:'/exams',          icon:FileText,        label:'Exams'          },
     { to:'/question-banks', icon:Database,        label:'Question Banks' },
+    { to:'/categories',     icon:GraduationCap,   label:'Categories'     },
     { to:'/alerts',         icon:AlertTriangle,   label:'Alerts'         },
     { to:'/users',          icon:Users,           label:'Users'          },
     { to:'/licensing',      icon:Key,             label:'Licensing', highlight:true },

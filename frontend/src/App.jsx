@@ -19,6 +19,7 @@ import StudentResultPage  from './pages/StudentResultPage';
 import UsersPage          from './pages/UsersPage';
 import AlertsPage         from './pages/AlertsPage';
 import LicensingPage      from './pages/LicensingPage';
+import CategoriesPage     from './pages/CategoriesPage';
 import OrgAdminPage       from './pages/OrgAdminPage';
 import QuestionBankPage   from './pages/QuestionBankPage';
 import PracticeTestPage   from './pages/PracticeTestPage';
@@ -102,6 +103,8 @@ export default function App() {
             element={<PrivateRoute roles={['admin','org_admin','examiner']}><AlertsPage/></PrivateRoute>}/>
           <Route path="licensing"
             element={<PrivateRoute roles={['admin']}><LicensingPage/></PrivateRoute>}/>
+          <Route path="categories"
+            element={<PrivateRoute roles={['admin']}><CategoriesPage/></PrivateRoute>}/>
           <Route path="org-admin"
             element={<PrivateRoute roles={['org_admin','admin']}><OrgAdminPage/></PrivateRoute>}/>
           <Route path="question-banks" element={<QuestionBankPage/>}/>

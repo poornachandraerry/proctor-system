@@ -100,6 +100,7 @@ app.use('/api/public-exam', require('./routes/publicExamLink'));
 
 // ── NEW v5 routes ──────────────────────────────────────────
 app.use('/api/question-banks', require('./routes/questionBanks'));
+app.use('/api/categories',     require('./routes/categories'));
 app.use('/api/behaviour',      require('./routes/behaviour'));
 app.use('/api/audio',          require('./routes/audio'));
 app.use('/api/evidence',       require('./routes/evidence'));

@@ -24,12 +24,14 @@ async function getBanks(req, res) {
     const r = await query(`
       SELECT qb.*,
         u.first_name || ' ' || u.last_name as creator_name,
+        sc.name as target_category_name,
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id) as question_count,
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='easy')   as easy_count,
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='medium') as medium_count,
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='hard')   as hard_count
       FROM question_banks qb
       LEFT JOIN users u ON qb.created_by=u.id
+      LEFT JOIN student_categories sc ON qb.target_category_id=sc.id
       ${where} ORDER BY qb.created_at DESC
     `, params);
     res.json(r.rows);
@@ -54,27 +56,32 @@ async function getBank(req, res) {
 
 async function createBank(req, res) {
   try {
-    const { name, description, subject, module: mod, isPublic, tags } = req.body;
+    const { name, description, subject, module: mod, isPublic, tags, pricePerAttempt, targetCategoryId } = req.body;
     if (!name) return res.status(400).json({ error: 'Bank name required' });
     const r = await query(`
-      INSERT INTO question_banks (name, description, subject, module, created_by, org_id, is_public, tags)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
+      INSERT INTO question_banks (name, description, subject, module, created_by, org_id, is_public, tags, price_per_attempt, target_category_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
     `, [name, description, subject, mod, req.user.id,
-        req.user.org_id || null, isPublic || false, JSON.stringify(tags || [])]);
+        req.user.org_id || null, isPublic || false, JSON.stringify(tags || []),
+        parseFloat(pricePerAttempt) || 0, targetCategoryId || null]);
     res.status(201).json(r.rows[0]);
   } catch { res.status(500).json({ error: 'Failed to create bank' }); }
 }
 
 async function updateBank(req, res) {
   try {
-    const { name, description, subject, module: mod, isPublic } = req.body;
+    const { name, description, subject, module: mod, isPublic, pricePerAttempt, targetCategoryId } = req.body;
     await query(`
       UPDATE question_banks SET
         name=COALESCE($1,name), description=COALESCE($2,description),
         subject=COALESCE($3,subject), module=COALESCE($4,module),
-        is_public=COALESCE($5,is_public), updated_at=NOW()
-      WHERE id=$6
-    `, [name, description, subject, mod, isPublic !== undefined ? isPublic : null, req.params.id]);
+        is_public=COALESCE($5,is_public),
+        price_per_attempt=COALESCE($6,price_per_attempt),
+        target_category_id=COALESCE($7,target_category_id), updated_at=NOW()
+      WHERE id=$8
+    `, [name, description, subject, mod, isPublic !== undefined ? isPublic : null,
+        pricePerAttempt !== undefined ? parseFloat(pricePerAttempt) : null,
+        targetCategoryId !== undefined ? targetCategoryId : null, req.params.id]);
     res.json({ message: 'Bank updated' });
   } catch { res.status(500).json({ error: 'Failed to update bank' }); }
 }
@@ -104,6 +111,20 @@ async function getBankQuestions(req, res) {
     ]);
     res.json({ questions: rows.rows, total: parseInt(cnt.rows[0].count) });
   } catch { res.status(500).json({ error: 'Failed to fetch questions' }); }
+}
+
+// Topic list only — no question text or answers — so students can pick
+// what to practice without ever seeing the actual bank content.
+async function getBankTopics(req, res) {
+  try {
+    const r = await query(`
+      SELECT topic, COUNT(*) as count
+      FROM bank_questions
+      WHERE bank_id=$1 AND topic IS NOT NULL AND topic != ''
+      GROUP BY topic ORDER BY topic ASC
+    `, [req.params.id]);
+    res.json(r.rows);
+  } catch { res.status(500).json({ error: 'Failed to fetch topics' }); }
 }
 
 async function addBankQuestion(req, res) {
@@ -227,17 +248,54 @@ async function generateExamFromBank(req, res) {
 // ── PRACTICE TEST (student self-service) ──────────────────
 async function generatePracticeTest(req, res) {
   try {
-    const { bankId, numQuestions, durationMinutes, difficulty } = req.body;
+    const { bankId, numQuestions, durationMinutes, difficulty, topics } = req.body;
     if (!bankId || !numQuestions || !durationMinutes)
       return res.status(400).json({ error: 'bankId, numQuestions and durationMinutes required' });
 
-    const diffCondition = (difficulty && difficulty !== 'mixed') ? `AND difficulty = '${difficulty}'` : '';
+    const bankRes = await query('SELECT id, name, price_per_attempt FROM question_banks WHERE id=$1', [bankId]);
+    if (!bankRes.rows.length) return res.status(404).json({ error: 'Question bank not found' });
+    const bank = bankRes.rows[0];
+    const price = parseFloat(bank.price_per_attempt || 0);
+
+    // Priced banks require one unconsumed, verified-paid credit per
+    // attempt — never a running balance. If none exists, tell the frontend
+    // to open the payment flow instead of generating anything.
+    let credit = null;
+    if (price > 0) {
+      const creditRes = await query(`
+        SELECT * FROM bank_payment_credits
+        WHERE user_id=$1 AND bank_id=$2 AND status='paid' AND consumed_at IS NULL
+        ORDER BY created_at ASC LIMIT 1
+      `, [req.user.id, bankId]);
+      if (!creditRes.rows.length) {
+        return res.status(402).json({
+          error: `This question bank requires payment — ₹${price} per practice attempt.`,
+          code: 'PAYMENT_REQUIRED',
+          pricePerAttempt: price,
+          bankId,
+        });
+      }
+      credit = creditRes.rows[0];
+    }
+
+    const conditions = ['bank_id=$1'];
+    const params = [bankId];
+    if (difficulty && difficulty !== 'mixed') {
+      params.push(difficulty);
+      conditions.push(`difficulty=$${params.length}`);
+    }
+    if (Array.isArray(topics) && topics.length > 0) {
+      params.push(topics);
+      conditions.push(`topic = ANY($${params.length}::text[])`);
+    }
+    params.push(Math.min(parseInt(numQuestions), 100));
+
     const qRes = await query(`
       SELECT id, question_text, question_type, options, marks, difficulty, topic, time_limit_secs
       FROM bank_questions
-      WHERE bank_id=$1 ${diffCondition}
-      ORDER BY RANDOM() LIMIT $2
-    `, [bankId, Math.min(parseInt(numQuestions), 100)]);
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY RANDOM() LIMIT $${params.length}
+    `, params);
 
     if (!qRes.rows.length)
       return res.status(400).json({ error: 'Not enough questions available for this selection' });
@@ -247,10 +305,18 @@ async function generatePracticeTest(req, res) {
 
     const sessRes = await query(`
       INSERT INTO practice_sessions
-        (student_id, bank_id, question_ids, num_questions, duration_mins, difficulty, total_marks)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
+        (student_id, bank_id, question_ids, num_questions, duration_mins, difficulty, total_marks, credit_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
     `, [req.user.id, bankId, JSON.stringify(questionIds),
-        qRes.rows.length, durationMinutes, difficulty || 'mixed', totalMarks]);
+        qRes.rows.length, durationMinutes, difficulty || 'mixed', totalMarks,
+        credit ? credit.id : null]);
+
+    if (credit) {
+      await query(
+        "UPDATE bank_payment_credits SET consumed_at=NOW(), practice_session_id=$1 WHERE id=$2",
+        [sessRes.rows[0].id, credit.id]
+      );
+    }
 
     res.status(201).json({
       practiceSession: sessRes.rows[0],
@@ -333,7 +399,7 @@ async function getPracticeHistory(req, res) {
 
 module.exports = {
   getBanks, getBank, createBank, updateBank, deleteBank,
-  getBankQuestions, addBankQuestion, bulkAddBankQuestions,
+  getBankQuestions, getBankTopics, addBankQuestion, bulkAddBankQuestions,
   updateBankQuestion, deleteBankQuestion,
   generateExamFromBank,
   generatePracticeTest, submitPracticeTest, getPracticeHistory,

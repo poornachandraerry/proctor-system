@@ -72,10 +72,13 @@ export default function QuestionBankPage() {
   const [uploadErrors, setUploadErrors]   = useState([]);
   const [importing, setImporting]         = useState(false);
 
-  const [bankForm, setBankForm] = useState({ name:'', description:'', subject:'', module:'', isPublic: false });
+  const [bankForm, setBankForm] = useState({ name:'', description:'', subject:'', module:'', isPublic: false, pricePerAttempt: 0, targetCategoryId: '' });
   const [qForm, setQForm]       = useState({ ...EMPTY_Q });
   const [genExamForm, setGenExamForm]   = useState({ title:'', numQuestions:20, durationMinutes:30, difficulty:'mixed', passPercentage:40 });
-  const [genPractForm, setGenPractForm] = useState({ numQuestions:10, durationMinutes:20, difficulty:'mixed' });
+  const [genPractForm, setGenPractForm] = useState({ numQuestions:10, durationMinutes:20, difficulty:'mixed', topics:[] });
+  const [bankTopics, setBankTopics]     = useState([]);
+  const [allCategories, setAllCategories] = useState([]);
+  const [paying, setPaying]             = useState(false);
   const [aiTopic, setAiTopic]   = useState('');
   const [aiDiff, setAiDiff]     = useState('medium');
   const [aiCount, setAiCount]   = useState(10);
@@ -90,6 +93,7 @@ export default function QuestionBankPage() {
   }, []);
 
   useEffect(() => { loadBanks(); }, [loadBanks]);
+  useEffect(() => { api.get('/auth/categories').then(({ data }) => setAllCategories(data || [])).catch(() => {}); }, []);
 
   const loadQuestions = useCallback(async (bankId) => {
     if (!bankId) return;
@@ -105,7 +109,17 @@ export default function QuestionBankPage() {
     finally { setQLoading(false); }
   }, [diffFilter, search]);
 
-  useEffect(() => { if (selectedBank) loadQuestions(selectedBank.id); }, [selectedBank, loadQuestions]);
+  useEffect(() => { if (selectedBank && isStaff) loadQuestions(selectedBank.id); }, [selectedBank, isStaff, loadQuestions]);
+
+  // Topic list for the practice-test filter — safe for students since it's
+  // just names/counts, never question text or answers.
+  useEffect(() => {
+    if (!selectedBank) { setBankTopics([]); return; }
+    setGenPractForm(f => ({ ...f, topics: [] }));
+    api.get(`/question-banks/${selectedBank.id}/topics`)
+      .then(({ data }) => setBankTopics(data || []))
+      .catch(() => setBankTopics([]));
+  }, [selectedBank]);
 
   const handleCreateBank = async (e) => {
     e.preventDefault();
@@ -113,7 +127,7 @@ export default function QuestionBankPage() {
       const { data } = await api.post('/question-banks', bankForm);
       toast.success('Question bank created!');
       setShowCreateBank(false);
-      setBankForm({ name:'', description:'', subject:'', module:'', isPublic: false });
+      setBankForm({ name:'', description:'', subject:'', module:'', isPublic: false, pricePerAttempt: 0, targetCategoryId: '' });
       await loadBanks();
       setSelectedBank(data);
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
@@ -287,25 +301,79 @@ export default function QuestionBankPage() {
     } catch (err) { toast.error(err.response?.data?.error || 'Failed to generate exam'); }
   };
 
+  // Opens Razorpay Checkout for one practice-attempt credit on a priced
+  // bank. Razorpay's own checkout modal offers UPI (including a scannable
+  // QR code) alongside cards/netbanking — that's the "pay by QR" path,
+  // handled entirely inside Razorpay's UI rather than a custom QR widget.
+  const payForPracticeAttempt = (bankId, price, bankName) => new Promise((resolve, reject) => {
+    api.post(`/question-banks/${bankId}/payment/order`, {})
+      .then(({ data: order }) => {
+        if (!window.Razorpay) { toast.error('Payment system failed to load — please refresh and try again'); return reject(new Error('razorpay-not-loaded')); }
+        const rzp = new window.Razorpay({
+          key: order.keyId,
+          amount: order.amount,
+          currency: order.currency,
+          name: 'Proctor AIQ',
+          description: `Practice attempt — ${bankName}`,
+          order_id: order.orderId,
+          theme: { color: '#6366f1' },
+          handler: async (response) => {
+            try {
+              await api.post(`/question-banks/${bankId}/payment/verify`, response);
+              toast.success('Payment successful!');
+              resolve();
+            } catch (err) {
+              toast.error('Payment verification failed — please contact support if the amount was deducted');
+              reject(err);
+            }
+          },
+          modal: { ondismiss: () => reject(new Error('cancelled')) },
+        });
+        rzp.on('payment.failed', () => { toast.error('Payment failed'); reject(new Error('payment-failed')); });
+        rzp.open();
+      })
+      .catch(err => { toast.error(err.response?.data?.error || 'Failed to start payment'); reject(err); });
+  });
+
   const handleGeneratePractice = async (e) => {
     e.preventDefault();
+    const payload = {
+      ...genPractForm, bankId: selectedBank.id,
+      numQuestions: parseInt(genPractForm.numQuestions),
+      durationMinutes: parseInt(genPractForm.durationMinutes),
+    };
     try {
-      const { data } = await api.post('/question-banks/practice/generate', {
-        ...genPractForm, bankId: selectedBank.id,
-        numQuestions: parseInt(genPractForm.numQuestions),
-        durationMinutes: parseInt(genPractForm.durationMinutes),
-      });
-      toast.success(`Practice test ready — ${data.questions.length} questions!`);
-      setShowGenPractice(false);
-      localStorage.setItem('practiceSession', JSON.stringify({
-        sessionId: data.practiceSession.id,
-        questions: data.questions,
-        totalMarks: data.totalMarks,
-        durationMinutes: parseInt(genPractForm.durationMinutes),
-        bankName: selectedBank.name,
-      }));
-      navigate('/practice-test');
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to generate practice test'); }
+      const { data } = await api.post('/question-banks/practice/generate', payload);
+      launchPracticeTest(data);
+    } catch (err) {
+      if (err.response?.status === 402 && err.response.data?.code === 'PAYMENT_REQUIRED') {
+        setPaying(true);
+        try {
+          await payForPracticeAttempt(selectedBank.id, err.response.data.pricePerAttempt, selectedBank.name);
+          const { data } = await api.post('/question-banks/practice/generate', payload);
+          launchPracticeTest(data);
+        } catch {
+          // payment cancelled/failed — toasts already shown above
+        } finally {
+          setPaying(false);
+        }
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to generate practice test');
+      }
+    }
+  };
+
+  const launchPracticeTest = (data) => {
+    toast.success(`Practice test ready — ${data.questions.length} questions!`);
+    setShowGenPractice(false);
+    localStorage.setItem('practiceSession', JSON.stringify({
+      sessionId: data.practiceSession.id,
+      questions: data.questions,
+      totalMarks: data.totalMarks,
+      durationMinutes: parseInt(genPractForm.durationMinutes),
+      bankName: selectedBank.name,
+    }));
+    navigate('/practice-test');
   };
 
   return (
@@ -374,6 +442,20 @@ export default function QuestionBankPage() {
                     <span className="text-amber-400">{bank.medium_count}M</span>
                     <span className="text-red-400">{bank.hard_count}H</span>
                   </div>
+                  {!isStaff && bank.is_public && (
+                    <span className={`inline-block mt-2 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      parseFloat(bank.price_per_attempt) > 0
+                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
+                        : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                    }`}>
+                      {parseFloat(bank.price_per_attempt) > 0 ? `₹${bank.price_per_attempt} / attempt` : 'Free'}
+                    </span>
+                  )}
+                  {bank.target_category_name && (
+                    <span className="inline-block mt-2 ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-primary-500/15 text-primary-300 border border-primary-500/25">
+                      {bank.target_category_name}
+                    </span>
+                  )}
                 </div>
                 {isStaff && (
                   <button onClick={e => { e.stopPropagation(); handleDeleteBank(bank.id); }}
@@ -401,7 +483,7 @@ export default function QuestionBankPage() {
                 <div className="flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <h2 className="section-title">{selectedBank.name}</h2>
-                    <p className="text-xs text-surface-400 mt-0.5">{qTotal} questions</p>
+                    <p className="text-xs text-surface-400 mt-0.5">{isStaff ? qTotal : selectedBank.question_count} questions</p>
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     {isStaff && (
@@ -503,71 +585,93 @@ export default function QuestionBankPage() {
                 </div>
               )}
 
-              {/* Filters */}
-              <div className="flex gap-3">
-                <div className="relative flex-1">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500"/>
-                  <input value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Search questions..." className="input pl-9 text-sm py-2"/>
-                </div>
-                <select value={diffFilter} onChange={e => setDiffFilter(e.target.value)} className="input w-32 text-sm py-2">
-                  <option value="">All Levels</option>
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-                <button onClick={() => loadQuestions(selectedBank.id)} className="btn-secondary px-3">
-                  <RefreshCw size={14}/>
-                </button>
-              </div>
-
-              {/* Questions list */}
-              {qLoading ? (
-                [...Array(5)].map((_,i) => <div key={i} className="glass rounded-xl h-16 animate-pulse"/>)
-              ) : questions.length === 0 ? (
-                <div className="glass rounded-2xl p-10 text-center border border-surface-700">
-                  <BookOpen size={32} className="text-surface-700 mx-auto mb-3"/>
-                  <p className="text-surface-500 text-sm">No questions in this bank yet</p>
-                  {isStaff && (
-                    <button onClick={() => setShowAddQ(true)} className="btn-primary mx-auto mt-3 text-sm">
-                      <Plus size={14}/>Add First Question
+              {/* Filters — staff only, since this section lists raw question text */}
+              {isStaff && (
+                <>
+                  <div className="flex gap-3">
+                    <div className="relative flex-1">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500"/>
+                      <input value={search} onChange={e => setSearch(e.target.value)}
+                        placeholder="Search questions..." className="input pl-9 text-sm py-2"/>
+                    </div>
+                    <select value={diffFilter} onChange={e => setDiffFilter(e.target.value)} className="input w-32 text-sm py-2">
+                      <option value="">All Levels</option>
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                    <button onClick={() => loadQuestions(selectedBank.id)} className="btn-secondary px-3">
+                      <RefreshCw size={14}/>
                     </button>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-[calc(100vh-400px)] overflow-y-auto pr-1">
-                  {questions.map((q, i) => (
-                    <motion.div key={q.id} initial={{ opacity:0, x:8 }} animate={{ opacity:1, x:0 }}
-                      transition={{ delay: i * 0.02 }}
-                      className="glass rounded-xl p-3.5 border border-surface-700 hover:border-surface-600 transition-colors">
-                      <div className="flex items-start gap-3">
-                        <span className="text-xs font-mono text-surface-500 shrink-0 mt-0.5 w-6">{i+1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-surface-200 line-clamp-2">{q.question_text}</p>
-                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                            <span className={`text-xs px-1.5 py-0.5 rounded border ${DIFF_STYLE[q.difficulty]}`}>
-                              {q.difficulty}
-                            </span>
-                            <span className="text-xs text-surface-500 capitalize">
-                              {q.question_type?.replace(/_/g,' ')}
-                            </span>
-                            {q.topic && (
-                              <span className="text-xs text-surface-600 bg-surface-800 px-1.5 py-0.5 rounded">
-                                {q.topic}
-                              </span>
-                            )}
-                            <span className="text-xs text-surface-500">{q.marks}m</span>
+                  </div>
+
+                  {/* Questions list */}
+                  {qLoading ? (
+                    [...Array(5)].map((_,i) => <div key={i} className="glass rounded-xl h-16 animate-pulse"/>)
+                  ) : questions.length === 0 ? (
+                    <div className="glass rounded-2xl p-10 text-center border border-surface-700">
+                      <BookOpen size={32} className="text-surface-700 mx-auto mb-3"/>
+                      <p className="text-surface-500 text-sm">No questions in this bank yet</p>
+                      {isStaff && (
+                        <button onClick={() => setShowAddQ(true)} className="btn-primary mx-auto mt-3 text-sm">
+                          <Plus size={14}/>Add First Question
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[calc(100vh-400px)] overflow-y-auto pr-1">
+                      {questions.map((q, i) => (
+                        <motion.div key={q.id} initial={{ opacity:0, x:8 }} animate={{ opacity:1, x:0 }}
+                          transition={{ delay: i * 0.02 }}
+                          className="glass rounded-xl p-3.5 border border-surface-700 hover:border-surface-600 transition-colors">
+                          <div className="flex items-start gap-3">
+                            <span className="text-xs font-mono text-surface-500 shrink-0 mt-0.5 w-6">{i+1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-surface-200 line-clamp-2">{q.question_text}</p>
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                <span className={`text-xs px-1.5 py-0.5 rounded border ${DIFF_STYLE[q.difficulty]}`}>
+                                  {q.difficulty}
+                                </span>
+                                <span className="text-xs text-surface-500 capitalize">
+                                  {q.question_type?.replace(/_/g,' ')}
+                                </span>
+                                {q.topic && (
+                                  <span className="text-xs text-surface-600 bg-surface-800 px-1.5 py-0.5 rounded">
+                                    {q.topic}
+                                  </span>
+                                )}
+                                <span className="text-xs text-surface-500">{q.marks}m</span>
+                              </div>
+                            </div>
+                            <button onClick={() => handleDeleteQ(q.id)}
+                              className="p-1.5 text-surface-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg shrink-0">
+                              <Trash2 size={12}/>
+                            </button>
                           </div>
-                        </div>
-                        {isStaff && (
-                          <button onClick={() => handleDeleteQ(q.id)}
-                            className="p-1.5 text-surface-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg shrink-0">
-                            <Trash2 size={12}/>
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Student view — no raw questions ever shown, only a path to a practice test */}
+              {!isStaff && (
+                <div className="glass rounded-2xl p-8 text-center border border-surface-700/50">
+                  <BookOpen size={40} className="text-primary-400/60 mx-auto mb-4"/>
+                  <h3 className="font-display text-lg font-semibold text-white mb-1.5">Ready to practice?</h3>
+                  <p className="text-surface-400 text-sm mb-1 max-w-md mx-auto">
+                    {selectedBank.question_count} questions across {bankTopics.length || 0} topic{bankTopics.length !== 1 ? 's' : ''} are available in this bank.
+                    Choose your topics, difficulty, question count, and time limit to build a custom practice test.
+                  </p>
+                  {parseFloat(selectedBank.price_per_attempt) > 0 ? (
+                    <p className="text-amber-400 text-sm font-semibold mb-5">₹{selectedBank.price_per_attempt} per practice attempt</p>
+                  ) : (
+                    <p className="text-emerald-400 text-sm font-semibold mb-5">Free to practice</p>
+                  )}
+                  <button onClick={() => setShowGenPractice(true)} className="btn-primary mx-auto">
+                    <BookOpen size={16}/>Create Practice Test
+                  </button>
                 </div>
               )}
             </div>
@@ -606,6 +710,27 @@ export default function QuestionBankPage() {
               className="w-4 h-4 accent-primary-500"/>
             <span className="text-sm text-surface-300">Make public (visible to all students)</span>
           </label>
+          {bankForm.isPublic && (
+            <div>
+              <label className="label text-xs">Price per Practice Attempt (₹)</label>
+              <input type="number" value={bankForm.pricePerAttempt}
+                onChange={e => setBankForm({...bankForm, pricePerAttempt: Math.max(0, parseFloat(e.target.value)||0)})}
+                className="input" min="0" step="1" placeholder="0"/>
+              <p className="text-xs text-surface-500 mt-1">
+                Set to 0 for a free bank. Otherwise, students pay this amount each time they generate a new practice test — one payment funds exactly one attempt.
+              </p>
+            </div>
+          )}
+          {allCategories.length > 0 && (
+            <div>
+              <label className="label text-xs">Target Audience (optional)</label>
+              <select value={bankForm.targetCategoryId} onChange={e => setBankForm({...bankForm, targetCategoryId:e.target.value})} className="input">
+                <option value="">General / No specific audience</option>
+                {allCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <p className="text-xs text-surface-500 mt-1">Tags this bank for a target exam segment — shown as a label to help students find relevant banks.</p>
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setShowCreateBank(false)} className="btn-secondary flex-1 justify-center">Cancel</button>
             <button type="submit" className="btn-primary flex-1 justify-center">Create Bank</button>
@@ -749,8 +874,38 @@ export default function QuestionBankPage() {
       <Modal open={showGenPractice} onClose={() => setShowGenPractice(false)} title={`Practice Test — ${selectedBank?.name}`}>
         <form onSubmit={handleGeneratePractice} className="space-y-4">
           <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
-            📚 A timed practice test with randomly selected questions. Your score is shown at the end but not saved in the main system.
+            📚 A timed practice test with randomly selected questions. Once submitted you'll get your score and the full answer key.
           </div>
+          {parseFloat(selectedBank?.price_per_attempt) > 0 && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 flex items-center gap-2">
+              <span>💳</span>
+              <span>This bank costs <strong>₹{selectedBank.price_per_attempt}</strong> per practice attempt. You'll be asked to pay before this test starts — each payment covers exactly one attempt.</span>
+            </div>
+          )}
+          {bankTopics.length > 0 && (
+            <div>
+              <label className="label text-xs">Topics (leave empty for all topics)</label>
+              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 border border-surface-700 rounded-xl">
+                {bankTopics.map(t => {
+                  const active = genPractForm.topics.includes(t.topic);
+                  return (
+                    <button key={t.topic} type="button"
+                      onClick={() => setGenPractForm(f => ({
+                        ...f,
+                        topics: active ? f.topics.filter(x => x !== t.topic) : [...f.topics, t.topic],
+                      }))}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        active
+                          ? 'bg-primary-500/20 text-primary-300 border-primary-500/40'
+                          : 'bg-surface-800 text-surface-400 border-surface-700 hover:border-surface-600'
+                      }`}>
+                      {t.topic} <span className="opacity-60">({t.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label text-xs">Number of Questions</label>
@@ -776,7 +931,12 @@ export default function QuestionBankPage() {
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => setShowGenPractice(false)} className="btn-secondary flex-1 justify-center">Cancel</button>
-            <button type="submit" className="btn-primary flex-1 justify-center"><BookOpen size={14}/>Start Practice Test</button>
+            <button type="submit" disabled={paying} className="btn-primary flex-1 justify-center">
+              {paying
+                ? <><Loader size={14} className="animate-spin"/>Processing payment...</>
+                : <><BookOpen size={14}/>{parseFloat(selectedBank?.price_per_attempt) > 0 ? `Pay ₹${selectedBank.price_per_attempt} & Start` : 'Start Practice Test'}</>
+              }
+            </button>
           </div>
         </form>
       </Modal>

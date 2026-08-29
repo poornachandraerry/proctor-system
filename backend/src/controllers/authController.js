@@ -32,16 +32,24 @@ async function login(req, res) {
 
 async function register(req, res) {
   try {
-    const { email, password, firstName, lastName, role = 'student', organization } = req.body;
+    const { email, password, firstName, lastName, role = 'student', organization, categoryId } = req.body;
     if (!email || !password || !firstName || !lastName) return res.status(400).json({ error: 'All fields required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
     const existing = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
     if (existing.rows.length) return res.status(409).json({ error: 'Email already registered' });
     const passwordHash = await bcrypt.hash(password, 12);
     const allowedRole = ['student', 'examiner'].includes(role) ? role : 'student';
+    // Category (e.g. "CAT Aspirant") is a target-exam label for students
+    // only — it never affects permissions, so it's silently ignored for
+    // any other role rather than rejected.
+    let validCategoryId = null;
+    if (allowedRole === 'student' && categoryId) {
+      const cat = await query('SELECT id FROM student_categories WHERE id=$1 AND is_active=true', [categoryId]);
+      if (cat.rows.length) validCategoryId = categoryId;
+    }
     const result = await query(
-      'INSERT INTO users (email, password_hash, first_name, last_name, role, organization, is_email_verified) VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id, email, first_name, last_name, role',
-      [email.toLowerCase(), passwordHash, firstName, lastName, allowedRole, organization]
+      'INSERT INTO users (email, password_hash, first_name, last_name, role, organization, category_id, is_email_verified) VALUES ($1, $2, $3, $4, $5, $6, $7, true) RETURNING id, email, first_name, last_name, role',
+      [email.toLowerCase(), passwordHash, firstName, lastName, allowedRole, organization, validCategoryId]
     );
     const user = result.rows[0];
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
