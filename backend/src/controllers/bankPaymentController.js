@@ -26,7 +26,7 @@ function getRazorpay() {
 // is needed on top of this.
 async function createBankCreditOrder(req, res) {
   try {
-    const { bankId } = req.params;
+    const bankId = req.params.id;
     const bankRes = await query('SELECT id, name, price_per_attempt, is_public FROM question_banks WHERE id=$1', [bankId]);
     if (!bankRes.rows.length) return res.status(404).json({ error: 'Question bank not found' });
     const bank = bankRes.rows[0];
