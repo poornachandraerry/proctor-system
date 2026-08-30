@@ -79,6 +79,20 @@ export default function StudentResultPage() {
         </button>
       </div>
 
+      {/* Termination banner — shown instead of treating this like a normal graded result */}
+      {session.status === 'terminated' && (
+        <div className="rounded-2xl p-5 mb-6 border border-red-500/40 bg-red-950/40 flex items-start gap-3">
+          <AlertTriangle size={22} className="text-red-400 shrink-0 mt-0.5"/>
+          <div>
+            <h2 className="text-red-400 font-semibold text-base mb-1">This exam was terminated for a policy violation</h2>
+            <p className="text-sm text-surface-300">
+              {session.proctor_notes || 'Your session was ended automatically after repeated proctoring violations.'}
+            </p>
+            <p className="text-xs text-surface-500 mt-1.5">This attempt cannot be retaken. The score below reflects only what was answered before termination.</p>
+          </div>
+        </div>
+      )}
+
       {/* Result Hero */}
       <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
         className={`rounded-2xl p-8 mb-6 text-center border ${passed

@@ -224,6 +224,23 @@ export default function ExamTakePage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [terminated, setTerminated] = useState(false);
+
+  // Exit fullscreen the instant termination happens, from whichever of the
+  // several violation-handlers triggered it — a single watcher here is more
+  // reliable than remembering to call this at every setTerminated(true)
+  // call site individually. Leaving the candidate stuck in fullscreen on a
+  // "terminated" screen with no visible way out was the actual bug report.
+  // Marking isSubmitExitRef first stops the fullscreenchange handler below
+  // from treating this deliberate exit as yet another violation.
+  useEffect(() => {
+    if (!terminated) return;
+    const exitFn = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+    if (exitFn && isFs) {
+      isSubmitExitRef.current = true;
+      exitFn.call(document).catch(() => {});
+    }
+  }, [terminated]);
   const [warnings, setWarnings]   = useState(0);
   const [online, setOnline]       = useState(navigator.onLine);
   const [audioEnabled, setAudioEnabled] = useState(true);

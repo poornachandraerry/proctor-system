@@ -266,14 +266,26 @@ export default function ExamDetailPage() {
               ) : (
                 exam.status === 'published' ? (
                   access?.alreadyAttempted ? (
-                    <>
-                      <div className="text-center text-sm text-emerald-400 font-semibold py-2 flex items-center justify-center gap-1.5">
-                        <CheckCircle size={15}/>Already Submitted
-                      </div>
-                      <Link to={`/results/${access.sessionId}`} className="btn-secondary w-full justify-center">
-                        View Your Result
-                      </Link>
-                    </>
+                    access.status === 'terminated' ? (
+                      <>
+                        <div className="text-center text-sm text-red-400 font-semibold py-2 flex items-center justify-center gap-1.5">
+                          <XCircle size={15}/>Terminated — Policy Violation
+                        </div>
+                        <p className="text-xs text-surface-500 text-center -mt-1 mb-1">This attempt cannot be retaken.</p>
+                        <Link to={`/results/${access.sessionId}`} className="btn-secondary w-full justify-center">
+                          View Details
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-center text-sm text-emerald-400 font-semibold py-2 flex items-center justify-center gap-1.5">
+                          <CheckCircle size={15}/>Already Submitted
+                        </div>
+                        <Link to={`/results/${access.sessionId}`} className="btn-secondary w-full justify-center">
+                          View Your Result
+                        </Link>
+                      </>
+                    )
                   ) : (
                     <button onClick={handleStart} disabled={starting} className="btn-primary w-full justify-center py-3 text-base">
                       {starting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Starting...</> : <><Play size={16}/>Start Exam</>}

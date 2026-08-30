@@ -291,6 +291,7 @@ async function checkExamAccess(req, res) {
           ? 'Your previous attempt at this exam was terminated for policy violations. You cannot retake it.'
           : 'You have already submitted this exam. You cannot retake it.',
         alreadyAttempted: true,
+        status: priorAttempt.rows[0].status, // 'submitted' | 'terminated' — for the frontend to style/label distinctly, instead of string-matching the reason text
         sessionId: priorAttempt.rows[0].id,
       });
     }
