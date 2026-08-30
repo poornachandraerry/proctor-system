@@ -164,6 +164,19 @@ async function submitSession(req, res) {
   try {
     const { id } = req.params;
     const { answers } = req.body;
+
+    const existing = await query('SELECT status FROM exam_sessions WHERE id=$1', [id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'Session not found' });
+    if (existing.rows[0].status === 'terminated') {
+      // Without this guard, a terminated session could still be completed
+      // and graded normally via a direct call to this endpoint — silently
+      // defeating the whole point of termination for policy violations.
+      return res.status(403).json({ error: 'This session was terminated for policy violations and cannot be submitted.' });
+    }
+    if (existing.rows[0].status === 'submitted') {
+      return res.json({ message: 'Already submitted' }); // idempotent — avoid reprocessing/overwriting a graded session
+    }
+
     await transaction(async (client) => {
       await client.query(
         "UPDATE exam_sessions SET status='submitted', submitted_at=NOW(), updated_at=NOW() WHERE id=$1", [id]
@@ -241,6 +254,25 @@ async function terminateSession(req, res) {
   try {
     const { id } = req.params;
     const { reason } = req.body;
+
+    const sess = await query('SELECT user_id, status FROM exam_sessions WHERE id=$1', [id]);
+    if (!sess.rows.length) return res.status(404).json({ error: 'Session not found' });
+    const { user_id, status } = sess.rows[0];
+
+    // A student may only end their OWN active session — this is exactly
+    // what the exam-taking page calls the moment a proctoring violation
+    // limit is hit. This route used to be admin/examiner-only, so that
+    // call was silently rejected with 403 (and swallowed by an empty
+    // catch{} on the frontend) — the session's status in the database
+    // never actually changed, only the browser's local "terminated"
+    // overlay did, so a reload or a fresh tab could resume the same
+    // "active" session indefinitely. Admin/examiner keep unrestricted
+    // access for manual intervention from the live monitor.
+    if (req.user.role === 'student') {
+      if (req.user.id !== user_id) return res.status(403).json({ error: 'Not your session' });
+      if (status !== 'active') return res.json({ message: 'Session already ended' }); // idempotent — not an error
+    }
+
     await query(
       "UPDATE exam_sessions SET status='terminated', proctor_notes=$1, updated_at=NOW() WHERE id=$2",
       [reason || 'Terminated by proctor', id]

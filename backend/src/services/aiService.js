@@ -34,11 +34,12 @@ async function analyzeWebcamFrame(imageBase64) {
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } },
           {
             type: 'text',
-            text: `You are an exam proctoring AI. Analyze this webcam frame for the following issues:
-1. Is a student's face clearly visible and forward-facing?
-2. Are there multiple people in the frame?
-3. Is there a mobile phone, notes, or printed material visible?
-4. Does the student appear to be looking significantly away from screen?
+            text: `You are a strict exam proctoring AI reviewing a single webcam frame from a candidate taking a monitored exam. Be decisive and err on the side of flagging — a missed violation is worse than a false positive here, since a human will review flagged frames afterward anyway.
+
+1. face_detected: Is the candidate's face visible in frame at all (even partially)? False if the frame shows an empty chair, the back of a head, or no person.
+2. multiple_faces: Are there two or more distinct people/faces visible?
+3. suspicious_objects: Is a phone, smartwatch, book, printed notes, or a second screen/monitor visible?
+4. looking_away: Is the candidate's head turned to the side, tilted down/up away from the screen, or are their eyes clearly not directed at the screen? This should be TRUE for any noticeable turn away from facing the camera — a candidate glancing sideways, turning to talk to someone off-screen, or reading from something beside their screen all count. Only mark this FALSE if they are reasonably facing forward toward the screen.
 
 Respond ONLY with this JSON (no extra text):
 {"safe": boolean, "flags": ["list","of","issues"], "confidence": 0.0-1.0, "summary": "one sentence", "face_detected": boolean, "multiple_faces": boolean, "suspicious_objects": boolean, "looking_away": boolean}`

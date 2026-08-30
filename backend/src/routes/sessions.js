@@ -7,5 +7,5 @@ router.get('/active', authorize('admin','examiner'), getActiveSessions);
 router.get('/:id', getSession);
 router.post('/:id/events', updateSessionEvent);
 router.post('/:id/submit', submitSession);
-router.post('/:id/terminate', authorize('admin','examiner'), terminateSession);
+router.post('/:id/terminate', authorize('admin','examiner','student'), terminateSession);
 module.exports = router;

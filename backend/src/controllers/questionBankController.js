@@ -21,6 +21,8 @@ async function getBanks(req, res) {
       conditions.push(`(qb.name ILIKE $${params.length} OR qb.subject ILIKE $${params.length})`);
     }
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    params.push(userId); // for the trial-used subquery below
+    const trialParamIdx = params.length;
     const r = await query(`
       SELECT qb.*,
         u.first_name || ' ' || u.last_name as creator_name,
@@ -28,7 +30,8 @@ async function getBanks(req, res) {
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id) as question_count,
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='easy')   as easy_count,
         (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='medium') as medium_count,
-        (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='hard')   as hard_count
+        (SELECT COUNT(*) FROM bank_questions WHERE bank_id=qb.id AND difficulty='hard')   as hard_count,
+        EXISTS(SELECT 1 FROM bank_free_trials WHERE bank_id=qb.id AND user_id=$${trialParamIdx}) as trial_used
       FROM question_banks qb
       LEFT JOIN users u ON qb.created_by=u.id
       LEFT JOIN student_categories sc ON qb.target_category_id=sc.id
@@ -56,32 +59,36 @@ async function getBank(req, res) {
 
 async function createBank(req, res) {
   try {
-    const { name, description, subject, module: mod, isPublic, tags, pricePerAttempt, targetCategoryId } = req.body;
+    const { name, description, subject, module: mod, isPublic, tags, pricePerAttempt, targetCategoryId, freeTrialQuestions } = req.body;
     if (!name) return res.status(400).json({ error: 'Bank name required' });
     const r = await query(`
-      INSERT INTO question_banks (name, description, subject, module, created_by, org_id, is_public, tags, price_per_attempt, target_category_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
+      INSERT INTO question_banks (name, description, subject, module, created_by, org_id, is_public, tags, price_per_attempt, target_category_id, free_trial_questions)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *
     `, [name, description, subject, mod, req.user.id,
         req.user.org_id || null, isPublic || false, JSON.stringify(tags || []),
-        parseFloat(pricePerAttempt) || 0, targetCategoryId || null]);
+        parseFloat(pricePerAttempt) || 0, targetCategoryId || null,
+        freeTrialQuestions !== undefined ? Math.max(0, parseInt(freeTrialQuestions)) : 5]);
     res.status(201).json(r.rows[0]);
   } catch { res.status(500).json({ error: 'Failed to create bank' }); }
 }
 
 async function updateBank(req, res) {
   try {
-    const { name, description, subject, module: mod, isPublic, pricePerAttempt, targetCategoryId } = req.body;
+    const { name, description, subject, module: mod, isPublic, pricePerAttempt, targetCategoryId, freeTrialQuestions } = req.body;
     await query(`
       UPDATE question_banks SET
         name=COALESCE($1,name), description=COALESCE($2,description),
         subject=COALESCE($3,subject), module=COALESCE($4,module),
         is_public=COALESCE($5,is_public),
         price_per_attempt=COALESCE($6,price_per_attempt),
-        target_category_id=COALESCE($7,target_category_id), updated_at=NOW()
-      WHERE id=$8
+        target_category_id=COALESCE($7,target_category_id),
+        free_trial_questions=COALESCE($8,free_trial_questions), updated_at=NOW()
+      WHERE id=$9
     `, [name, description, subject, mod, isPublic !== undefined ? isPublic : null,
         pricePerAttempt !== undefined ? parseFloat(pricePerAttempt) : null,
-        targetCategoryId !== undefined ? targetCategoryId : null, req.params.id]);
+        targetCategoryId !== undefined ? targetCategoryId : null,
+        freeTrialQuestions !== undefined ? Math.max(0, parseInt(freeTrialQuestions)) : null,
+        req.params.id]);
     res.json({ message: 'Bank updated' });
   } catch { res.status(500).json({ error: 'Failed to update bank' }); }
 }
@@ -252,22 +259,42 @@ async function generatePracticeTest(req, res) {
     if (!bankId || !numQuestions || !durationMinutes)
       return res.status(400).json({ error: 'bankId, numQuestions and durationMinutes required' });
 
-    const bankRes = await query('SELECT id, name, price_per_attempt FROM question_banks WHERE id=$1', [bankId]);
+    const bankRes = await query('SELECT id, name, price_per_attempt, free_trial_questions FROM question_banks WHERE id=$1', [bankId]);
     if (!bankRes.rows.length) return res.status(404).json({ error: 'Question bank not found' });
     const bank = bankRes.rows[0];
     const price = parseFloat(bank.price_per_attempt || 0);
+    const trialLimit = parseInt(bank.free_trial_questions || 0);
 
     // Priced banks require one unconsumed, verified-paid credit per
-    // attempt — never a running balance. If none exists, tell the frontend
-    // to open the payment flow instead of generating anything.
+    // attempt — never a running balance. If none exists, check whether
+    // this student still has their one free trial available on THIS bank
+    // (a freemium taste of the interface/questions, capped to a smaller
+    // question count than a paid attempt) before asking for payment. The
+    // developer admin role is exempt from payment entirely (needs to
+    // preview/QA priced banks without paying every time).
     let credit = null;
-    if (price > 0) {
+    let trialQuestionCap = null;
+    let usingFreeTrial = false;
+    if (price > 0 && req.user.role !== 'admin') {
       const creditRes = await query(`
         SELECT * FROM bank_payment_credits
         WHERE user_id=$1 AND bank_id=$2 AND status='paid' AND consumed_at IS NULL
         ORDER BY created_at ASC LIMIT 1
       `, [req.user.id, bankId]);
-      if (!creditRes.rows.length) {
+
+      if (creditRes.rows.length) {
+        credit = creditRes.rows[0];
+      } else if (trialLimit > 0) {
+        const trialRes = await query(
+          'SELECT id FROM bank_free_trials WHERE user_id=$1 AND bank_id=$2', [req.user.id, bankId]
+        );
+        if (!trialRes.rows.length) {
+          usingFreeTrial = true;
+          trialQuestionCap = trialLimit;
+        }
+      }
+
+      if (!credit && !usingFreeTrial) {
         return res.status(402).json({
           error: `This question bank requires payment — ₹${price} per practice attempt.`,
           code: 'PAYMENT_REQUIRED',
@@ -275,7 +302,6 @@ async function generatePracticeTest(req, res) {
           bankId,
         });
       }
-      credit = creditRes.rows[0];
     }
 
     const conditions = ['bank_id=$1'];
@@ -288,7 +314,14 @@ async function generatePracticeTest(req, res) {
       params.push(topics);
       conditions.push(`topic = ANY($${params.length}::text[])`);
     }
-    params.push(Math.min(parseInt(numQuestions), 100));
+    // A free-trial attempt is deliberately capped below whatever the
+    // student asked for, regardless of price_per_attempt's usual filters —
+    // it's meant as a taste of the interface/question style, not a full
+    // free attempt at paid-bank scale.
+    const effectiveNumQuestions = trialQuestionCap
+      ? Math.min(parseInt(numQuestions), trialQuestionCap, 100)
+      : Math.min(parseInt(numQuestions), 100);
+    params.push(effectiveNumQuestions);
 
     const qRes = await query(`
       SELECT id, question_text, question_type, options, marks, difficulty, topic, time_limit_secs
@@ -317,11 +350,24 @@ async function generatePracticeTest(req, res) {
         [sessRes.rows[0].id, credit.id]
       );
     }
+    if (usingFreeTrial) {
+      // ON CONFLICT DO NOTHING: the UNIQUE(user_id, bank_id) constraint is
+      // what actually enforces "only one free trial ever" — if a race let
+      // two requests both reach here, only one insert wins; the second
+      // request's session already exists by this point, which is a much
+      // smaller problem than double-billing would be, so we don't roll it
+      // back for this rare edge case.
+      await query(
+        'INSERT INTO bank_free_trials (user_id, bank_id, practice_session_id) VALUES ($1,$2,$3) ON CONFLICT (user_id, bank_id) DO NOTHING',
+        [req.user.id, bankId, sessRes.rows[0].id]
+      );
+    }
 
     res.status(201).json({
       practiceSession: sessRes.rows[0],
       questions: qRes.rows,
       totalMarks,
+      freeTrial: usingFreeTrial,
     });
   } catch (err) {
     logger.error('generatePracticeTest:', err.message);

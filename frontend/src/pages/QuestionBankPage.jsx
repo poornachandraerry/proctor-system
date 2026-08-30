@@ -72,7 +72,7 @@ export default function QuestionBankPage() {
   const [uploadErrors, setUploadErrors]   = useState([]);
   const [importing, setImporting]         = useState(false);
 
-  const [bankForm, setBankForm] = useState({ name:'', description:'', subject:'', module:'', isPublic: false, pricePerAttempt: 0, targetCategoryId: '' });
+  const [bankForm, setBankForm] = useState({ name:'', description:'', subject:'', module:'', isPublic: false, pricePerAttempt: 0, targetCategoryId: '', freeTrialQuestions: 5 });
   const [qForm, setQForm]       = useState({ ...EMPTY_Q });
   const [genExamForm, setGenExamForm]   = useState({ title:'', numQuestions:20, durationMinutes:30, difficulty:'mixed', passPercentage:40 });
   const [genPractForm, setGenPractForm] = useState({ numQuestions:10, durationMinutes:20, difficulty:'mixed', topics:[] });
@@ -121,13 +121,16 @@ export default function QuestionBankPage() {
       .catch(() => setBankTopics([]));
   }, [selectedBank]);
 
+  const isTrialEligible = parseFloat(selectedBank?.price_per_attempt) > 0 && user?.role !== 'admin'
+    && !selectedBank?.trial_used && parseInt(selectedBank?.free_trial_questions) > 0;
+
   const handleCreateBank = async (e) => {
     e.preventDefault();
     try {
       const { data } = await api.post('/question-banks', bankForm);
       toast.success('Question bank created!');
       setShowCreateBank(false);
-      setBankForm({ name:'', description:'', subject:'', module:'', isPublic: false, pricePerAttempt: 0, targetCategoryId: '' });
+      setBankForm({ name:'', description:'', subject:'', module:'', isPublic: false, pricePerAttempt: 0, targetCategoryId: '', freeTrialQuestions: 5 });
       await loadBanks();
       setSelectedBank(data);
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
@@ -363,9 +366,20 @@ export default function QuestionBankPage() {
     }
   };
 
-  const launchPracticeTest = (data) => {
-    toast.success(`Practice test ready — ${data.questions.length} questions!`);
+  const launchPracticeTest = async (data) => {
+    toast.success(data.freeTrial
+      ? `Free trial started — ${data.questions.length} questions!`
+      : `Practice test ready — ${data.questions.length} questions!`);
     setShowGenPractice(false);
+    if (data.freeTrial) {
+      // Refresh so the "first attempt free" badge disappears now that it's
+      // used — loadBanks() alone doesn't update the already-selected bank
+      // object, so pull the refreshed copy into selectedBank too.
+      const { data: refreshed } = await api.get('/question-banks');
+      setBanks(refreshed);
+      const updated = refreshed.find(b => b.id === selectedBank.id);
+      if (updated) setSelectedBank(updated);
+    }
     localStorage.setItem('practiceSession', JSON.stringify({
       sessionId: data.practiceSession.id,
       questions: data.questions,
@@ -449,6 +463,11 @@ export default function QuestionBankPage() {
                         : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
                     }`}>
                       {parseFloat(bank.price_per_attempt) > 0 ? `₹${bank.price_per_attempt} / attempt` : 'Free'}
+                    </span>
+                  )}
+                  {!isStaff && parseFloat(bank.price_per_attempt) > 0 && !bank.trial_used && parseInt(bank.free_trial_questions) > 0 && (
+                    <span className="inline-block mt-2 ml-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-primary-500/15 text-primary-300 border border-primary-500/25">
+                      First attempt free
                     </span>
                   )}
                   {bank.target_category_name && (
@@ -665,7 +684,14 @@ export default function QuestionBankPage() {
                     Choose your topics, difficulty, question count, and time limit to build a custom practice test.
                   </p>
                   {parseFloat(selectedBank.price_per_attempt) > 0 ? (
-                    <p className="text-amber-400 text-sm font-semibold mb-5">₹{selectedBank.price_per_attempt} per practice attempt</p>
+                    <p className="text-amber-400 text-sm font-semibold mb-5">
+                      ₹{selectedBank.price_per_attempt} per practice attempt
+                      {!selectedBank.trial_used && parseInt(selectedBank.free_trial_questions) > 0 && (
+                        <span className="block text-primary-300 font-normal mt-1">
+                          Your first attempt is free — up to {selectedBank.free_trial_questions} questions to try it out.
+                        </span>
+                      )}
+                    </p>
                   ) : (
                     <p className="text-emerald-400 text-sm font-semibold mb-5">Free to practice</p>
                   )}
@@ -718,6 +744,17 @@ export default function QuestionBankPage() {
                 className="input" min="0" step="1" placeholder="0"/>
               <p className="text-xs text-surface-500 mt-1">
                 Set to 0 for a free bank. Otherwise, students pay this amount each time they generate a new practice test — one payment funds exactly one attempt.
+              </p>
+            </div>
+          )}
+          {bankForm.isPublic && parseFloat(bankForm.pricePerAttempt) > 0 && (
+            <div>
+              <label className="label text-xs">Free Trial — Questions on First Attempt</label>
+              <input type="number" value={bankForm.freeTrialQuestions}
+                onChange={e => setBankForm({...bankForm, freeTrialQuestions: Math.max(0, parseInt(e.target.value)||0)})}
+                className="input" min="0" step="1" placeholder="5"/>
+              <p className="text-xs text-surface-500 mt-1">
+                Every new student gets ONE free attempt on this bank, capped to this many questions — a taste of the interface before paying. Set to 0 to disable and require payment from the first attempt.
               </p>
             </div>
           )}
@@ -876,10 +913,22 @@ export default function QuestionBankPage() {
           <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
             📚 A timed practice test with randomly selected questions. Once submitted you'll get your score and the full answer key.
           </div>
-          {parseFloat(selectedBank?.price_per_attempt) > 0 && (
+          {parseFloat(selectedBank?.price_per_attempt) > 0 && user?.role !== 'admin' && !selectedBank?.trial_used && parseInt(selectedBank?.free_trial_questions) > 0 && (
+            <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-xl text-xs text-primary-300 flex items-center gap-2">
+              <span>🎁</span>
+              <span>Your first attempt on this bank is <strong>free</strong>, capped at {selectedBank.free_trial_questions} questions — a taste of the interface before you pay for full attempts.</span>
+            </div>
+          )}
+          {parseFloat(selectedBank?.price_per_attempt) > 0 && user?.role !== 'admin' && (selectedBank?.trial_used || !parseInt(selectedBank?.free_trial_questions)) && (
             <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 flex items-center gap-2">
               <span>💳</span>
               <span>This bank costs <strong>₹{selectedBank.price_per_attempt}</strong> per practice attempt. You'll be asked to pay before this test starts — each payment covers exactly one attempt.</span>
+            </div>
+          )}
+          {parseFloat(selectedBank?.price_per_attempt) > 0 && user?.role === 'admin' && (
+            <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-xl text-xs text-primary-300 flex items-center gap-2">
+              <span>🛠️</span>
+              <span>This bank is priced at ₹{selectedBank.price_per_attempt} for students, but admin accounts can preview practice tests free of charge.</span>
             </div>
           )}
           {bankTopics.length > 0 && (
@@ -911,7 +960,11 @@ export default function QuestionBankPage() {
               <label className="label text-xs">Number of Questions</label>
               <input type="number" value={genPractForm.numQuestions}
                 onChange={e => setGenPractForm({...genPractForm, numQuestions:e.target.value})}
-                className="input" min="1" max="100"/>
+                className="input" min="1"
+                max={isTrialEligible ? selectedBank.free_trial_questions : 100}/>
+              {isTrialEligible && (
+                <p className="text-xs text-primary-400 mt-1">Capped at {selectedBank.free_trial_questions} for your free trial attempt</p>
+              )}
             </div>
             <div>
               <label className="label text-xs">Time Limit (minutes)</label>
@@ -934,7 +987,13 @@ export default function QuestionBankPage() {
             <button type="submit" disabled={paying} className="btn-primary flex-1 justify-center">
               {paying
                 ? <><Loader size={14} className="animate-spin"/>Processing payment...</>
-                : <><BookOpen size={14}/>{parseFloat(selectedBank?.price_per_attempt) > 0 ? `Pay ₹${selectedBank.price_per_attempt} & Start` : 'Start Practice Test'}</>
+                : <><BookOpen size={14}/>{
+                    isTrialEligible
+                      ? 'Start Free Trial'
+                      : parseFloat(selectedBank?.price_per_attempt) > 0 && user?.role !== 'admin'
+                        ? `Pay ₹${selectedBank.price_per_attempt} & Start`
+                        : 'Start Practice Test'
+                  }</>
               }
             </button>
           </div>
