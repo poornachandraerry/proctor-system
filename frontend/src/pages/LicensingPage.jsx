@@ -333,7 +333,7 @@ function OrgsTab({ plans }) {
     name:'', slug:'', domain:'', contactName:'', contactEmail:'',
     contactPhone:'', address:'', city:'', state:'', pincode:'',
     country:'India', gstNumber:'', panNumber:'',
-    planId:'', billingCycle:'monthly', trialDays:14, notes:''
+    planId:'', billingCycle:'monthly', trialDays:14, notes:'', startActive:false
   });
 
   const fetch = useCallback(async () => {
@@ -530,8 +530,16 @@ function OrgsTab({ plans }) {
                 <option value="yearly">Yearly</option>
               </select>
             </div>
-            <div><label className="label text-xs">Trial Days</label><input type="number" value={form.trialDays} onChange={e=>setForm({...form,trialDays:e.target.value})} className="input" min="0" max="90"/></div>
+            {!form.startActive && (
+              <div><label className="label text-xs">Trial Days</label><input type="number" value={form.trialDays} onChange={e=>setForm({...form,trialDays:e.target.value})} className="input" min="0" max="90"/></div>
+            )}
           </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.startActive}
+              onChange={e=>setForm({...form,startActive:e.target.checked})}
+              className="w-4 h-4 accent-primary-500"/>
+            <span className="text-sm text-surface-300">Start directly on paid plan (skip trial) — use when the client has already paid via invoice or bank transfer</span>
+          </label>
           <div><label className="label text-xs">Internal Notes</label><textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} className="input resize-none h-16" placeholder="Notes about this client..."/></div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={()=>setShowCreate(false)} className="btn-secondary flex-1 justify-center">Cancel</button>
@@ -796,6 +804,39 @@ function InvoicesTab({ orgs, plans }) {
     catch { toast.error('Failed'); }
   };
 
+  const [payingId, setPayingId] = useState(null);
+  const handlePayViaRazorpay = async (invoice) => {
+    setPayingId(invoice.id);
+    try {
+      const { data: order } = await api.post(`/licensing/invoices/${invoice.id}/payment/order`, {});
+      if (!window.Razorpay) { toast.error('Payment system failed to load — please refresh and try again'); setPayingId(null); return; }
+      const rzp = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'Proctor AIQ',
+        description: `License invoice ${order.invoiceNumber} — ${invoice.org_name}`,
+        order_id: order.orderId,
+        theme: { color: '#6366f1' },
+        handler: async (response) => {
+          try {
+            await api.post(`/licensing/invoices/${invoice.id}/payment/verify`, response);
+            toast.success('Payment verified — license activated!');
+            fetchInvoices();
+          } catch {
+            toast.error('Payment verification failed — please contact support if the amount was deducted');
+          } finally { setPayingId(null); }
+        },
+        modal: { ondismiss: () => setPayingId(null) },
+      });
+      rzp.on('payment.failed', () => { toast.error('Payment failed'); setPayingId(null); });
+      rzp.open();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to start payment');
+      setPayingId(null);
+    }
+  };
+
   const base    = parseFloat(form.baseAmount||0);
   const isIgst  = form.isIgst;
   const cgst    = isIgst ? 0 : base*0.09;
@@ -843,9 +884,18 @@ function InvoicesTab({ orgs, plans }) {
                   <td className="px-4 py-3"><span className="text-xs text-surface-400">{inv.due_date?new Date(inv.due_date).toLocaleDateString('en-IN'):'—'}</span></td>
                   <td className="px-4 py-3">
                     {inv.status==='pending' && (
-                      <button onClick={()=>handleMarkPaid(inv.id)} className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/20 font-medium">
-                        Mark Paid
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={()=>handlePayViaRazorpay(inv)}
+                          disabled={payingId===inv.id}
+                          className="text-xs px-2.5 py-1.5 rounded-lg bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 border border-primary-500/20 font-medium disabled:opacity-50"
+                        >
+                          {payingId===inv.id ? 'Processing...' : 'Pay via Razorpay'}
+                        </button>
+                        <button onClick={()=>handleMarkPaid(inv.id)} className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/20 font-medium">
+                          Mark Paid Manually
+                        </button>
+                      </div>
                     )}
                   </td>
                 </motion.tr>

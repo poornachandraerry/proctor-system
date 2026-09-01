@@ -443,10 +443,69 @@ async function getPracticeHistory(req, res) {
   } catch { res.status(500).json({ error: 'Failed to get practice history' }); }
 }
 
+// PDF scorecard for a completed practice test — regenerated on demand from
+// the persisted answers/score rather than only being available once at
+// submit time, so a student can come back and redownload it later.
+async function getPracticeResultPdf(req, res) {
+  try {
+    const { sessionId } = req.params;
+    const sessRes = await query(`
+      SELECT ps.*, qb.name as bank_name,
+        u.first_name || ' ' || u.last_name as student_name
+      FROM practice_sessions ps
+      JOIN question_banks qb ON ps.bank_id=qb.id
+      JOIN users u ON ps.student_id=u.id
+      WHERE ps.id=$1 AND ps.student_id=$2
+    `, [sessionId, req.user.id]);
+    if (!sessRes.rows.length) return res.status(404).json({ error: 'Practice session not found' });
+    const sess = sessRes.rows[0];
+    if (sess.status !== 'submitted') return res.status(400).json({ error: 'This practice test has not been submitted yet' });
+
+    const qRes = await query('SELECT * FROM bank_questions WHERE id = ANY($1::uuid[])', [sess.question_ids]);
+    const byId = Object.fromEntries(qRes.rows.map(q => [q.id, q]));
+    const studentAnswers = sess.answers || {};
+
+    // Preserve the order the student actually saw the questions in.
+    const questions = sess.question_ids.map(qid => {
+      const q = byId[qid];
+      if (!q) return null;
+      const userAnswer = studentAnswers[qid];
+      const is_correct = userAnswer ? JSON.stringify(userAnswer) === JSON.stringify(q.correct_answer) : false;
+      const marks_obtained = is_correct ? parseFloat(q.marks) : (userAnswer ? -parseFloat(q.negative_marks || 0) : 0);
+      return {
+        question_text: q.question_text,
+        marks_obtained,
+        is_correct,
+        // Matches the same "Option X" convention already shown in the app's
+        // own results review, for consistency between screen and PDF.
+        correct_answer_text: `Option ${String(q.correct_answer).toUpperCase()}`,
+      };
+    }).filter(Boolean);
+
+    const { generatePracticeReportPDF } = require('../services/pdfService');
+    const buffer = await generatePracticeReportPDF({
+      studentName: sess.student_name,
+      bankName: sess.bank_name,
+      submittedAt: sess.submitted_at,
+      score: parseFloat(sess.score || 0),
+      totalMarks: parseFloat(sess.total_marks || 0),
+      questions,
+    });
+
+    const filename = `ProctorAIQ_Practice_${sess.bank_name.replace(/\s+/g,'_')}_${new Date(sess.submitted_at).toISOString().slice(0,10)}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    logger.error('getPracticeResultPdf:', err.message);
+    res.status(500).json({ error: 'Failed to generate practice report' });
+  }
+}
+
 module.exports = {
   getBanks, getBank, createBank, updateBank, deleteBank,
   getBankQuestions, getBankTopics, addBankQuestion, bulkAddBankQuestions,
   updateBankQuestion, deleteBankQuestion,
   generateExamFromBank,
-  generatePracticeTest, submitPracticeTest, getPracticeHistory,
+  generatePracticeTest, submitPracticeTest, getPracticeHistory, getPracticeResultPdf,
 };

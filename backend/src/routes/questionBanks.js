@@ -45,6 +45,7 @@ router.post('/:id/payment/verify', payments.verifyBankCreditPayment);
 // Practice tests (all authenticated users)
 router.post('/practice/generate',          ctrl.generatePracticeTest);
 router.post('/practice/:sessionId/submit', ctrl.submitPracticeTest);
+router.get('/practice/:sessionId/pdf',     ctrl.getPracticeResultPdf);
 router.get('/practice/history',            ctrl.getPracticeHistory);
 
 module.exports = router;

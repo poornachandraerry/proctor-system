@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const ctrl = require('../controllers/licensingController');
+const payments = require('../controllers/licensingPaymentController');
 
 // Public — sandbox access link (no auth)
 router.get('/sandbox/access/:token', ctrl.accessSandbox);
@@ -34,6 +35,8 @@ router.patch('/sandboxes/:id/toggle', ctrl.toggleSandbox);
 router.get('/invoices',           ctrl.getInvoices);
 router.post('/invoices',          ctrl.createInvoice);
 router.patch('/invoices/:id/pay', ctrl.markInvoicePaid);
+router.post('/invoices/:id/payment/order',  payments.createInvoiceOrder);
+router.post('/invoices/:id/payment/verify', payments.verifyInvoicePayment);
 
 module.exports = router;
 

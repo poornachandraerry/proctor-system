@@ -134,24 +134,37 @@ async function createOrg(req, res) {
     const {
       name, slug, domain, contactName, contactEmail, contactPhone,
       address, city, state, country, pincode, gstNumber, panNumber,
-      planId, billingCycle, trialDays, notes
+      planId, billingCycle, trialDays, notes, startActive
     } = req.body;
     if (!name || !slug || !planId) return res.status(400).json({ error: 'Name, slug and plan required' });
     const licKey  = crypto.randomBytes(24).toString('hex').toUpperCase();
-    const trialEnd = new Date(Date.now() + (parseInt(trialDays)||14)*86400000);
+
+    // Previously license_status was hardcoded to 'trial' in the SQL below
+    // regardless of what was actually chosen here — a paid/monetary plan
+    // selection had no effect at all. startActive lets the platform admin
+    // skip the trial entirely (e.g. the client already paid via invoice or
+    // bank transfer) and go straight to an active license with a real
+    // expiry computed from the billing cycle, instead of every org always
+    // starting as a trial no matter what was selected.
+    const isActive  = !!startActive;
+    const cycleDays = billingCycle === 'yearly' ? 365 : 30;
+    const trialEnd  = isActive ? null : new Date(Date.now() + (parseInt(trialDays)||14)*86400000);
+    const licenseExpiresAt = isActive ? new Date(Date.now() + cycleDays*86400000) : null;
+    const licenseStatus = isActive ? 'active' : 'trial';
+
     const r = await query(`
       INSERT INTO organizations (
         name, slug, domain, contact_name, contact_email, contact_phone,
         address, city, state, country, pincode, gst_number, pan_number,
         plan_id, license_key, license_status, license_starts_at,
-        trial_ends_at, billing_cycle, notes, created_by
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'trial',NOW(),$16,$17,$18,$19)
+        license_expires_at, trial_ends_at, billing_cycle, notes, created_by
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),$17,$18,$19,$20,$21)
       RETURNING *
     `, [name, slug, domain, contactName, contactEmail, contactPhone,
         address, city, state, country||'India', pincode, gstNumber, panNumber,
-        planId, licKey, trialEnd, billingCycle||'monthly', notes, req.user.id]);
+        planId, licKey, licenseStatus, licenseExpiresAt, trialEnd, billingCycle||'monthly', notes, req.user.id]);
     await query('INSERT INTO org_activity_logs (org_id, user_id, action, details) VALUES ($1,$2,$3,$4)',
-      [r.rows[0].id, req.user.id, 'org_created', JSON.stringify({ name, planId })]);
+      [r.rows[0].id, req.user.id, 'org_created', JSON.stringify({ name, planId, startedActive: isActive })]);
     res.status(201).json(r.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Organisation slug already exists' });

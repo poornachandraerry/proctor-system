@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock, CheckCircle, XCircle, ChevronLeft, ChevronRight,
-  BookOpen, Award, RotateCcw, AlertTriangle
+  BookOpen, Award, RotateCcw, AlertTriangle, Download, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
@@ -18,6 +18,7 @@ export default function PracticeTestPage() {
   const [submitted, setSubmitted]   = useState(false);
   const [results, setResults]       = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const timerRef = useRef(null);
 
   useEffect(() => {
@@ -70,6 +71,21 @@ export default function PracticeTestPage() {
       toast.error(err.response?.data?.error || 'Submission failed');
     } finally { setSubmitting(false); }
   }, [session, answers, submitting, submitted]);
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      const res = await api.get(`/question-banks/practice/${session.sessionId}/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ProctorAIQ_Practice_${session.bankName?.replace(/\s+/g,'_') || 'Report'}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to download PDF report');
+    } finally { setDownloadingPdf(false); }
+  };
 
   if (!session) return (
     <div className="flex items-center justify-center h-full">
@@ -159,6 +175,12 @@ export default function PracticeTestPage() {
           <div className="flex gap-3">
             <button onClick={() => navigate('/question-banks')} className="btn-secondary flex-1 justify-center">
               <BookOpen size={15}/>Back to Banks
+            </button>
+            <button onClick={handleDownloadPdf} disabled={downloadingPdf} className="btn-secondary flex-1 justify-center">
+              {downloadingPdf
+                ? <><Loader2 size={15} className="animate-spin"/>Preparing...</>
+                : <><Download size={15}/>Download PDF</>
+              }
             </button>
             <button
               onClick={() => navigate('/question-banks')}

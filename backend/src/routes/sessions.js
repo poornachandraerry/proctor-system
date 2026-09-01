@@ -3,9 +3,9 @@ const { startSession, getSession, updateSessionEvent, submitSession, getActiveSe
 const { authenticate, authorize } = require('../middleware/auth');
 router.use(authenticate);
 router.post('/start', startSession);
-router.get('/active', authorize('admin','examiner'), getActiveSessions);
+router.get('/active', authorize('admin','org_admin','examiner'), getActiveSessions);
 router.get('/:id', getSession);
 router.post('/:id/events', updateSessionEvent);
 router.post('/:id/submit', submitSession);
-router.post('/:id/terminate', authorize('admin','examiner','student'), terminateSession);
+router.post('/:id/terminate', authorize('admin','org_admin','examiner','student'), terminateSession);
 module.exports = router;

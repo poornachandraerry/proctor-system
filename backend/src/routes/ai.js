@@ -3,6 +3,6 @@ const { analyzeFrame, analyzeSession, generateQuestion } = require('../controlle
 const { authenticate, authorize } = require('../middleware/auth');
 router.use(authenticate);
 router.post('/analyze-frame', analyzeFrame);
-router.get('/analyze-session/:sessionId', authorize('admin','examiner'), analyzeSession);
-router.post('/generate-questions', authorize('admin','examiner'), generateQuestion);
+router.get('/analyze-session/:sessionId', authorize('admin','org_admin','examiner'), analyzeSession);
+router.post('/generate-questions', authorize('admin','org_admin','examiner'), generateQuestion);
 module.exports = router;

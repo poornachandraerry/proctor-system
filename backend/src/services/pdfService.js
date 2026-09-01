@@ -145,4 +145,95 @@ async function generateScoreCardPDF(reportData) {
   });
 }
 
-module.exports = { generateScoreCardPDF };
+module.exports = { generateScoreCardPDF, generatePracticeReportPDF };
+
+// Practice tests aren't proctored (no risk score, no alerts, no
+// pass_percentage on the bank), so this is a leaner scorecard than the
+// full exam one above — same branding, just the fields that actually apply.
+async function generatePracticeReportPDF(reportData) {
+  return new Promise((resolve, reject) => {
+    try {
+      const { studentName, bankName, submittedAt, score, totalMarks, questions } = reportData;
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const PRIMARY = '#4F46E5';
+      const SURFACE = '#1E293B';
+      const SUCCESS = '#059669';
+      const DANGER  = '#DC2626';
+      const MUTED   = '#64748B';
+      const WHITE   = '#FFFFFF';
+      const LIGHT   = '#F1F5F9';
+
+      const scorePct = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
+      const passed   = scorePct >= 60;
+
+      doc.rect(0, 0, 595, 110).fill(PRIMARY);
+      doc.fill(WHITE).font('Helvetica-Bold').fontSize(26).text('Proctor ', 50, 28, { continued: true }).fill('#C4B5FD').text('AIQ');
+      doc.fill('#C4B5FD').font('Helvetica').fontSize(11).text('Practice Test Report', 50, 58);
+      doc.fill(WHITE).font('Helvetica-Bold').fontSize(13).text('PRACTICE SCORECARD', 380, 38);
+      doc.fill('#C4B5FD').font('Helvetica').fontSize(9).text(`Generated: ${new Date().toLocaleString('en-IN')}`, 390, 58);
+
+      doc.rect(50, 130, 495, 80).fill(SURFACE).stroke('#334155');
+      doc.fill(LIGHT).font('Helvetica-Bold').fontSize(18).text(bankName, 65, 148, { width: 420 });
+      doc.fill(MUTED).font('Helvetica').fontSize(10).text(`Student: ${studentName}`, 65, 178);
+      doc.fill(MUTED).fontSize(9).text(`Submitted: ${submittedAt ? new Date(submittedAt).toLocaleString('en-IN') : '—'}`, 65, 195);
+
+      const boxes = [
+        { label: 'Score',      value: `${Number.isInteger(score) ? score : score.toFixed(2)} / ${totalMarks}`, color: passed ? SUCCESS : DANGER },
+        { label: 'Percentage', value: `${scorePct}%`, color: passed ? SUCCESS : DANGER },
+        { label: 'Correct',    value: `${questions.filter(q => q.is_correct === true).length}`, color: SUCCESS },
+        { label: 'Wrong',      value: `${questions.filter(q => q.is_correct === false).length}`, color: DANGER },
+      ];
+      let bx = 50;
+      boxes.forEach(b => {
+        doc.rect(bx, 225, 115, 70).fill('#0F172A').stroke('#334155');
+        doc.fill(b.color).font('Helvetica-Bold').fontSize(20).text(b.value, bx + 5, 238, { width: 105, align: 'center' });
+        doc.fill(MUTED).font('Helvetica').fontSize(9).text(b.label, bx + 5, 263, { width: 105, align: 'center' });
+        bx += 125;
+      });
+
+      let py = 320;
+      doc.fill(PRIMARY).font('Helvetica-Bold').fontSize(12).text('ANSWER KEY', 50, py);
+      py += 20;
+      doc.fill(MUTED).font('Helvetica-Bold').fontSize(8);
+      doc.text('#', 50, py, { width: 20 });
+      doc.text('Question', 75, py, { width: 340 });
+      doc.text('Marks', 425, py, { width: 55, align: 'right' });
+      doc.text('Result', 490, py, { width: 55, align: 'right' });
+      py += 14;
+      doc.moveTo(50, py).lineTo(545, py).stroke('#334155');
+      py += 8;
+
+      questions.forEach((q, i) => {
+        if (py > 750) { doc.addPage(); py = 50; }
+        const rowColor = q.is_correct ? '#F0FDF4' : '#FEF2F2';
+        const textHeight = doc.font('Helvetica').fontSize(8).heightOfString(q.question_text, { width: 340 });
+        const rowHeight = Math.max(textHeight + 8, 20);
+        doc.rect(50, py - 2, 495, rowHeight).fill(rowColor);
+        doc.fill('#1E293B').font('Helvetica').fontSize(8).text(String(i + 1), 50, py, { width: 20 });
+        doc.text(q.question_text, 75, py, { width: 340 });
+        doc.font('Helvetica-Bold').fillColor(q.is_correct ? SUCCESS : DANGER)
+          .text(`${q.marks_obtained}`, 425, py, { width: 55, align: 'right' });
+        doc.text(q.is_correct ? '✓' : '✗', 490, py, { width: 55, align: 'right' });
+        py += rowHeight;
+        if (!q.is_correct && q.correct_answer_text) {
+          doc.font('Helvetica-Oblique').fillColor(SUCCESS).fontSize(7.5)
+            .text(`Correct answer: ${q.correct_answer_text}`, 75, py, { width: 460 });
+          py += 12;
+        }
+        py += 4;
+      });
+
+      doc.fill(MUTED).font('Helvetica').fontSize(7).text(
+        `Proctor AIQ Practice Report  |  ${bankName}  |  ${studentName}`,
+        50, 800, { width: 495, align: 'center' }
+      );
+
+      doc.end();
+    } catch (err) { reject(err); }
+  });
+}

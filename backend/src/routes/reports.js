@@ -124,7 +124,7 @@ router.get('/exam/:examId/excel', authorize('admin','org_admin','examiner'), asy
 });
 
 // Download blank question upload template
-router.get('/questions/template', authorize('admin','examiner'), async (req, res) => {
+router.get('/questions/template', authorize('admin','org_admin','examiner'), async (req, res) => {
   try {
     const buffer = await generateQuestionsTemplate();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
