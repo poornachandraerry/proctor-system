@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Search, Shield, Mail, Building, ToggleLeft, ToggleRight, RefreshCw, UserPlus, KeyRound, Copy, X } from 'lucide-react';
+import { Users, Search, Shield, Mail, Building, ToggleLeft, ToggleRight, RefreshCw, UserPlus, KeyRound, Copy, X, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 
@@ -49,6 +49,16 @@ export default function UsersPage() {
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !current } : u));
       toast.success(`User ${!current ? 'activated' : 'deactivated'}`);
     } catch { toast.error('Failed to update user'); }
+  };
+
+  const deleteUser = async (user) => {
+    if (!window.confirm(`Permanently delete ${user.first_name} ${user.last_name} (${user.email})? This also deletes their exam history and cannot be undone.\n\nTip: if you just want to disable their login without losing history, use the toggle instead of delete.`)) return;
+    try {
+      await api.delete(`/users/${user.id}`);
+      setUsers(prev => prev.filter(u => u.id !== user.id));
+      setTotal(t => t - 1);
+      toast.success('User deleted');
+    } catch (err) { toast.error(err.response?.data?.error || 'Failed to delete user'); }
   };
 
   const createUser = async (e) => {
@@ -203,6 +213,11 @@ export default function UsersPage() {
                         className="p-1.5 rounded-lg text-surface-400 hover:text-primary-400 hover:bg-primary-500/10 transition-colors disabled:opacity-50"
                         title="Reset password">
                         <KeyRound size={16} />
+                      </button>
+                      <button onClick={() => deleteUser(user)}
+                        className="p-1.5 rounded-lg text-surface-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        title="Delete user permanently">
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </td>

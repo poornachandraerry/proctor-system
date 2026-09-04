@@ -5,7 +5,7 @@ import {
   CheckCircle, XCircle, Clock, AlertTriangle, RefreshCw,
   Copy, ExternalLink, Shield, TrendingUp, Users, CreditCard,
   ChevronRight, Zap, Globe, ToggleLeft, ToggleRight,
-  Ban, Play, Eye, Activity, IndianRupee, Percent, UserPlus
+  Ban, Play, Eye, Activity, IndianRupee, Percent, UserPlus, Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
@@ -382,6 +382,16 @@ function OrgsTab({ plans }) {
     catch { toast.error('Failed'); }
   };
 
+  const handleDeleteOrg = async (org) => {
+    if (!window.confirm(`Permanently delete "${org.name}"? This deletes all its exams, question banks, and invoices. Member user accounts are kept but become unaffiliated with any organization. This cannot be undone.`)) return;
+    if (!window.confirm(`Really sure? Type-to-confirm isn't required, but this is your last chance to cancel deleting "${org.name}".`)) return;
+    try {
+      await api.delete(`/licensing/orgs/${org.id}`);
+      toast.success(`"${org.name}" deleted`);
+      fetch();
+    } catch (err) { toast.error(err.response?.data?.error || 'Failed to delete organization'); }
+  };
+
   const handleRegenKey = async (id) => {
     if (!confirm('Regenerate licence key? The old key will stop working immediately.')) return;
     try {
@@ -482,6 +492,10 @@ function OrgsTab({ plans }) {
                         title="Create Org Admin Login"
                         className="p-1.5 text-surface-400 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg">
                         <UserPlus size={13}/>
+                      </button>
+                      <button onClick={()=>handleDeleteOrg(org)} title="Delete Organization"
+                        className="p-1.5 text-surface-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg">
+                        <Trash2 size={13}/>
                       </button>
                     </div>
                   </td>
@@ -804,6 +818,12 @@ function InvoicesTab({ orgs, plans }) {
     catch { toast.error('Failed'); }
   };
 
+  const handleDeleteInvoice = async (inv) => {
+    if (!window.confirm(`Delete invoice ${inv.invoice_number}? This cannot be undone.`)) return;
+    try { await api.delete(`/licensing/invoices/${inv.id}`); toast.success('Invoice deleted'); fetchInvoices(); }
+    catch (err) { toast.error(err.response?.data?.error || 'Failed to delete invoice'); }
+  };
+
   const [payingId, setPayingId] = useState(null);
   const handlePayViaRazorpay = async (invoice) => {
     setPayingId(invoice.id);
@@ -883,20 +903,26 @@ function InvoicesTab({ orgs, plans }) {
                   <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full border font-semibold capitalize ${INV_STATUS[inv.status]||''}`}>{inv.status}</span></td>
                   <td className="px-4 py-3"><span className="text-xs text-surface-400">{inv.due_date?new Date(inv.due_date).toLocaleDateString('en-IN'):'—'}</span></td>
                   <td className="px-4 py-3">
-                    {inv.status==='pending' && (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={()=>handlePayViaRazorpay(inv)}
-                          disabled={payingId===inv.id}
-                          className="text-xs px-2.5 py-1.5 rounded-lg bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 border border-primary-500/20 font-medium disabled:opacity-50"
-                        >
-                          {payingId===inv.id ? 'Processing...' : 'Pay via Razorpay'}
-                        </button>
-                        <button onClick={()=>handleMarkPaid(inv.id)} className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/20 font-medium">
-                          Mark Paid Manually
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {inv.status==='pending' && (
+                        <>
+                          <button
+                            onClick={()=>handlePayViaRazorpay(inv)}
+                            disabled={payingId===inv.id}
+                            className="text-xs px-2.5 py-1.5 rounded-lg bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 border border-primary-500/20 font-medium disabled:opacity-50"
+                          >
+                            {payingId===inv.id ? 'Processing...' : 'Pay via Razorpay'}
+                          </button>
+                          <button onClick={()=>handleMarkPaid(inv.id)} className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/20 font-medium">
+                            Mark Paid Manually
+                          </button>
+                        </>
+                      )}
+                      <button onClick={()=>handleDeleteInvoice(inv)} title="Delete invoice"
+                        className="p-1.5 text-surface-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg">
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
                   </td>
                 </motion.tr>
               ))}

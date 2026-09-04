@@ -21,6 +21,7 @@ router.get('/orgs',               ctrl.getOrgs);
 router.post('/orgs',              ctrl.createOrg);
 router.get('/orgs/:id',           ctrl.getOrg);
 router.put('/orgs/:id',           ctrl.updateOrg);
+router.delete('/orgs/:id',        ctrl.deleteOrg);
 router.post('/orgs/:id/suspend',  ctrl.suspendOrg);
 router.post('/orgs/:id/activate', ctrl.activateOrg);
 router.post('/orgs/:id/regen-key',ctrl.regenerateLicenseKey);
@@ -33,6 +34,7 @@ router.patch('/sandboxes/:id/toggle', ctrl.toggleSandbox);
 
 // GST Invoices
 router.get('/invoices',           ctrl.getInvoices);
+router.delete('/invoices/:id',    ctrl.deleteInvoice);
 router.post('/invoices',          ctrl.createInvoice);
 router.patch('/invoices/:id/pay', ctrl.markInvoicePaid);
 router.post('/invoices/:id/payment/order',  payments.createInvoiceOrder);

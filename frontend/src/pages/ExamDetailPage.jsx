@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Clock, Users, FileText, Shield, Monitor,
   Play, CheckCircle, FileSpreadsheet, Edit2, Mail,
-  Globe, Lock, Building2, Eye, EyeOff, AlertTriangle, XCircle
+  Globe, Lock, Building2, Eye, EyeOff, AlertTriangle, XCircle, Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
@@ -70,6 +70,15 @@ export default function ExamDetailPage() {
       setExam(p => ({ ...p, status: 'published' }));
       toast.success('Exam published!');
     } catch (err) { toast.error(err.response?.data?.error || 'Publish failed'); }
+  };
+
+  const handleDeleteExam = async () => {
+    if (!window.confirm(`Permanently delete "${exam.title}"? This also deletes all its questions, sessions, answers, and results. This cannot be undone.`)) return;
+    try {
+      await api.delete(`/exams/${id}`);
+      toast.success('Exam deleted');
+      navigate('/exams');
+    } catch (err) { toast.error(err.response?.data?.error || 'Failed to delete exam'); }
   };
 
   const handleStart = async () => {
@@ -171,14 +180,22 @@ export default function ExamDetailPage() {
 
       {/* Staff tabs */}
       {isStaff && (
-        <div className="flex gap-1 bg-surface-900 rounded-xl p-1 mb-5 border border-surface-800 w-fit">
-          {STAFF_TABS.map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all font-heading ${activeTab===t.id?'bg-primary-600 text-white':'text-surface-400 hover:text-white'}`}>
-              {t.label}
-              {t.badge && <span className="text-amber-400 text-xs">{t.badge}</span>}
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex gap-1 bg-surface-900 rounded-xl p-1 border border-surface-800 w-fit">
+            {STAFF_TABS.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all font-heading ${activeTab===t.id?'bg-primary-600 text-white':'text-surface-400 hover:text-white'}`}>
+                {t.label}
+                {t.badge && <span className="text-amber-400 text-xs">{t.badge}</span>}
+              </button>
+            ))}
+          </div>
+          {user?.role === 'admin' && (
+            <button onClick={handleDeleteExam}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-red-400 hover:bg-red-500/10 border border-red-500/20">
+              <Trash2 size={14}/>Delete Exam
             </button>
-          ))}
+          )}
         </div>
       )}
 

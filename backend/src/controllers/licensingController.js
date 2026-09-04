@@ -129,6 +129,36 @@ async function getOrg(req, res) {
   } catch { res.status(500).json({ error: 'Failed to fetch org' }); }
 }
 
+// Deletes the organization and (via existing ON DELETE CASCADE foreign
+// keys already in the schema) everything scoped to it — its exams, exam
+// sessions/answers/alerts, question banks and their questions/practice
+// sessions, gst_invoices, and activity logs. User ACCOUNTS are the one
+// deliberate exception: users.org_id is ON DELETE SET NULL, so member
+// accounts survive as unaffiliated users rather than being deleted —
+// deleting an org should not silently delete people's login accounts.
+async function deleteOrg(req, res) {
+  try {
+    const { id } = req.params;
+    const r = await query('DELETE FROM organizations WHERE id=$1 RETURNING name', [id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Organization not found' });
+    res.json({ message: `Organization "${r.rows[0].name}" and all its exams, question banks, and invoices have been deleted. Member user accounts were kept, now unaffiliated with any organization.` });
+  } catch (err) {
+    logger.error('deleteOrg:', err.message);
+    res.status(500).json({ error: 'Failed to delete organization' });
+  }
+}
+
+async function deleteInvoice(req, res) {
+  try {
+    const r = await query('DELETE FROM gst_invoices WHERE id=$1 RETURNING invoice_number', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Invoice not found' });
+    res.json({ message: `Invoice ${r.rows[0].invoice_number} deleted` });
+  } catch (err) {
+    logger.error('deleteInvoice:', err.message);
+    res.status(500).json({ error: 'Failed to delete invoice' });
+  }
+}
+
 async function createOrg(req, res) {
   try {
     const {
@@ -476,10 +506,10 @@ async function getLicensingOverview(req, res) {
 
 module.exports = {
   getPlans, createPlan, updatePlan,
-  getOrgs, getOrg, createOrg, updateOrg, suspendOrg, activateOrg, regenerateLicenseKey,
+  getOrgs, getOrg, createOrg, updateOrg, deleteOrg, suspendOrg, activateOrg, regenerateLicenseKey,
   getOrgLiveUsage,
   createSandbox, getSandboxes, accessSandbox, toggleSandbox,
-  getInvoices, createInvoice, markInvoicePaid,
+  getInvoices, createInvoice, markInvoicePaid, deleteInvoice,
   getLicensingOverview,
 };
 

@@ -82,4 +82,33 @@ router.patch('/:id', async (req, res) => {
     res.json({ message: 'User updated' });
   } catch { res.status(500).json({ error: 'Failed to update user' }); }
 });
+
+// Permanently deletes a user account and (via existing ON DELETE CASCADE
+// foreign keys) their exam sessions, answers, proctoring alerts, and
+// practice history. Two guardrails: an admin can't delete their own
+// account this way (avoids accidentally locking themselves out), and the
+// platform must always keep at least one admin account.
+router.delete('/:id', authorize('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (id === req.user.id) return res.status(400).json({ error: "You can't delete your own account" });
+
+    const target = await query('SELECT role, email FROM users WHERE id=$1', [id]);
+    if (!target.rows.length) return res.status(404).json({ error: 'User not found' });
+
+    if (target.rows[0].role === 'admin') {
+      const adminCount = await query("SELECT COUNT(*) FROM users WHERE role='admin'");
+      if (parseInt(adminCount.rows[0].count) <= 1) {
+        return res.status(400).json({ error: 'Cannot delete the last remaining admin account' });
+      }
+    }
+
+    await query('DELETE FROM users WHERE id=$1', [id]);
+    res.json({ message: `User ${target.rows[0].email} deleted` });
+  } catch (err) {
+    logger.error('deleteUser:', err.message);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
 module.exports = router;
